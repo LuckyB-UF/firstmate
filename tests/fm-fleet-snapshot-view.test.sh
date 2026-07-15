@@ -563,6 +563,8 @@ test_held_backlog_item_is_distinguishable() {
 ## Queued
 - [ ] plain-item - Dispatchable work (repo: demo) (since 2026-07-15)
 - [ ] held-item - Gated work (repo: demo) (since 2026-07-15) (hold: captain decision pending) (hold-kind: captain)
+- [ ] comma-hold - Comma form (repo: demo, hold: waiting on captain, hold-kind: captain)
+- [ ] until-hold - Dated hold (repo: demo) (hold: waiting on legal) (hold-kind: future) (hold-until: 2026-12-01)
 
 ## Done
 EOF
@@ -583,6 +585,21 @@ EOF
       and .repo == "demo"
       and .since == "2026-07-15"
   ' >/dev/null || fail "held queued row did not parse its hold or clean its title"
+  # Hold detection must fail CLOSED. The comma metadata form is hand-written and
+  # ambiguous for a free-text reason, but an unreadable reason must never
+  # downgrade the item to dispatchable.
+  printf '%s' "$out" | jq -e '
+    .backlog.records[] | select(.id == "comma-hold")
+    | .held == true and .hold_kind == "captain" and .title == "Comma form"
+  ' >/dev/null || fail "comma-form hold failed open: held must be true"
+  # tasks-axi hold --until writes a third marker; an unstripped one also strands
+  # the earlier parens, because the metadata strip is end-anchored.
+  printf '%s' "$out" | jq -e '
+    .backlog.records[] | select(.id == "until-hold")
+    | .held == true
+      and .hold_until == "2026-12-01"
+      and .title == "Dated hold"
+  ' >/dev/null || fail "hold-until was not parsed or did not clean the title"
   out=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_DATA_OVERRIDE="$data" "$VIEW")
   printf '%s' "$out" | grep -q "held: captain decision pending (captain)" ||
     fail "view did not surface the hold in the gate column"

@@ -249,14 +249,24 @@ backlog_json() {  # [<backlog-path>] - defaults to this home's $BACKLOG
       cap($rest; ".*(?:\\(|,[[:space:]]*)" + $key + ":[[:space:]]*(?<v>[^,)]*)");
     def metadata_word($rest; $key):
       cap($rest; ".*(?:\\(|,[[:space:]]*)" + $key + "[[:space:]]+(?<v>[^,)]*)");
+    # A hold gates dispatch, so detection fails CLOSED: any hold: key in either
+    # the paren or the comma metadata form marks the item held, even when its
+    # reason cannot be read cleanly. Reporting a held item as dispatchable is the
+    # one error this must never make.
+    def hold_present($rest):
+      $rest | test(".*(?:\\(|,[[:space:]]*)hold:");
+    # tasks-axi renders a hold in its own paren and forbids ")" in --reason, so
+    # the paren form can carry a comma-bearing reason verbatim. The comma form is
+    # hand-written only and is ambiguous for free text, so it falls back to the
+    # shared helper and truncates at the first comma rather than guessing.
     def hold_reason_of($rest):
-      cap($rest; ".*\\(hold:[[:space:]]*(?<v>[^)]*)\\)");
+      cap($rest; ".*\\(hold:[[:space:]]*(?<v>[^)]*)\\)") // metadata($rest; "hold");
     def url_pattern: "https?://[^[:space:])\"<>]+";
     def wrapped_url_pattern: "<?" + url_pattern + ">?";
     def links($rest): [$rest | scan(url_pattern)];
     def strip_trailing_metadata:
       reduce range(0; 20) as $_ (.;
-        sub("[[:space:]]*\\([[:space:]]*(?:(?:repo|kind|priority|hold-kind|hold):[[:space:]]*[^)]*|(?:since|merged|reported|done)[[:space:]]+[^)]*)[[:space:]]*\\)[[:space:]]*$"; ""));
+        sub("[[:space:]]*\\([[:space:]]*(?:(?:repo|kind|priority|hold-until|hold-kind|hold):[[:space:]]*[^)]*|(?:since|merged|reported|done)[[:space:]]+[^)]*)[[:space:]]*\\)[[:space:]]*$"; ""));
     def strip_title_artifacts:
       sub("[[:space:]]+-[[:space:]]+data/[^[:space:])]+/report\\.md$"; "")
       | sub("[[:space:]]+data/[^[:space:])]+/report\\.md$"; "")
@@ -313,7 +323,8 @@ backlog_json() {  # [<backlog-path>] - defaults to this home's $BACKLOG
              priority:metadata($rest; "priority"),
              hold_reason:hold_reason_of($rest),
              hold_kind:metadata($rest; "hold-kind"),
-             held:(hold_reason_of($rest) != null),
+             hold_until:metadata($rest; "hold-until"),
+             held:hold_present($rest),
              blocked_by:cap($rest; ".*blocked-by:[[:space:]]*(?<v>[^[:space:])]+).*"),
              blocked_reason:blocked_reason($rest),
              since:metadata_word($rest; "since"),
