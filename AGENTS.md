@@ -531,7 +531,8 @@ A scout task follows Intake, Spawn, and Supervise exactly as above - scaffold th
 
 - There is no Validate or PR-ready stage. When the crewmate's status says `done`, read `data/<id>/report.md`.
 - Relay the findings to the captain: plain chat for a focused answer, lavish-axi when the report has structure worth a visual (multiple findings, options, a plan).
-- Tear down immediately - no merge gate. `bin/fm-teardown.sh` allows a scout worktree's scratch commits and dirty files once the report exists; if the report is missing, it refuses, because the findings are the work product.
+- Before treating the investigation or its visual review as complete, load `decision-hold-lifecycle`; scout teardown enforces that shared completion gate.
+- Tear down immediately after that gate - no merge gate. `bin/fm-teardown.sh` allows a scout worktree's scratch commits and dirty files once the report and decision inventory are complete; otherwise it refuses.
 - Record it in Done with the report path instead of a PR link using `tasks-axi done` when the default tasks-axi backend is active and compatible, otherwise hand-edit `data/backlog.md` and keep Done to the 10 most recent, then re-evaluate the queue and dispatch only queued work whose blockers are gone and whose time/date gate, if any, has arrived.
 
 **Promotion.** When a scout's findings reveal shippable work (a reproduced bug with a clear fix) and the captain wants it shipped, promote the task in place instead of respawning: run `bin/fm-promote.sh <id>` (flips `kind=` to ship in meta, restoring teardown's full protection), then from an active firstmate session send the crewmate its ship instructions with `FM_HOME=<this-firstmate-home> bin/fm-send.sh` unless `FM_HOME` is already set to the active firstmate home - inventory scratch state, reset to a clean default-branch base, carry over only intended fix changes, create branch `fm/<id>`, implement, and report `done` according to the project's delivery mode.
@@ -672,6 +673,7 @@ As a courtesy, mention cost when unusually much work is running (more than ~8 co
 It tracks work items only, never agents; persistent secondmates never appear as backlog items.
 Work routed to a secondmate is recorded in that secondmate home's own backlog, not the main backlog.
 When a main-side thread such as a pending captain decision or relay reminder is worth durable tracking, file it as its own work item; use `tasks-axi hold <id> --reason "<reason>" --kind captain` for a captain-gated thread.
+Unresolved decisions discovered by investigations or visual reviews follow `decision-hold-lifecycle`, which owns their mandatory backlog lifecycle.
 Update the backlog on every dispatch, completion, and decision for a work item.
 
 ```markdown
@@ -762,6 +764,7 @@ These skills are not captain-invocable; they are conditional operating reference
 - `firstmate-orca` - load before switching to Orca, spawning or supervising Orca-backed work, smoke-testing Orca backend behavior, debugging Orca task state, or reconciling Orca-backed task metadata.
 - `stuck-crewmate-recovery` - load after a stale wake, looping pane, repeated confusion, an answered-by-brief question, an unresponsive crewmate, or a failed steer.
 - `secondmate-provisioning` - load before creating, seeding, validating, launching, handing backlog to, recovering, pushing inherited config into, or retiring a secondmate home, and before editing `data/secondmates.md`.
+- `decision-hold-lifecycle` - load before treating an investigation or visual review as complete, before ending a visual review that exposed a decision, and when recording or routing the captain's answer.
 - `fmx-respond` - load on an `x-mention <request_id>` `check:` wake to handle the mention, on an `x-mode-error ...` `check:` wake to report the X-mode configuration blocker, and on any milestone or terminal wake for an X-mode-linked task before posting its completion follow-up; relevant only when X mode is on.
 - `firstmate-codexapp` - load before coordinating a visible Codex Desktop thread, evaluating a Codex App backend request, or reconciling Codex Desktop host-tool smoke evidence for Firstmate work.
 - `firstmate-coding-guidelines` - load before changing firstmate's shared, tracked material, as defined by section 1's list, whether editing directly or briefing a crewmate for a firstmate-repo task.
