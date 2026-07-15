@@ -58,7 +58,7 @@ printf '%s\n' "$SNAPSHOT" | jq -r '
     else "\($r.blocked_by) - \($r.blocked_reason)" end;
   def gate($r):
     (if ($r.held // false) then
-       "held: \($r.hold_reason // "no reason recorded")\(if ($r.hold_kind // "") == "" then "" else " (\($r.hold_kind))" end)"
+       "held: \(if ($r.hold_reason // "") == "" then "no reason recorded" else $r.hold_reason end)\(if ($r.hold_kind // "") == "" then "" else " (\($r.hold_kind))" end)"
      else null end) as $hold
     | (blocker($r) | if . == "-" then null else . end) as $blocked
     | [$hold, $blocked] | map(select(. != null)) | if length == 0 then "-" else join("; ") end;

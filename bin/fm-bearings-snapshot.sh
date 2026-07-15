@@ -290,6 +290,19 @@ MODEL=$(printf '%s' "$SNAP" | jq \
   --argjson candidate_prs "$CANDIDATE_PRS" '
   def trunc($n): if . == null then null else
     (tostring | gsub("\\s+"; " ") | if (length > $n) then (.[:$n] + "…") else . end) end;
+  def gate_by:
+    (if (.held // false) then
+       ("hold" + (if ((.hold_kind // "") == "") then "" else " (" + .hold_kind + ")" end))
+     else null end) as $hold
+    | [ $hold, (.blocked_by // null) ] | map(select(. != null))
+    | if length == 0 then "-" else join("; ") end;
+  def gate_reason:
+    (if (.held // false) then
+       (if ((.hold_reason // "") == "") then "no reason recorded" else .hold_reason end)
+     else null end) as $hold
+    | [ $hold, (if (.blocked_by // null) == null then null else (.blocked_reason // null) end) ]
+    | map(select(. != null))
+    | if length == 0 then "-" else (join("; ") | trunc(40)) end;
   ($fields | split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(. != ""))) as $fl
   | (($fl | index("bodies")) != null) as $f_bodies
   | (($fl | index("paths")) != null) as $f_paths
@@ -351,13 +364,13 @@ MODEL=$(printf '%s' "$SNAP" | jq \
        | select(.state == "queued" and .structured)
        | select(($all_queued == 1)
                 or (((.body_excerpt // "") | test("SUPERSEDED|NOT REQUIRED|NOT-REQUIRED|DEFERRED"; "i")) | not))
-       | {id, title:(.title | trunc(60)), blocked_by:(.blocked_by // "-"),
-          reason:((.blocked_reason // "-") | trunc(40)),owner:"(main)"} ]
+       | {id, title:(.title | trunc(60)), blocked_by:(gate_by), reason:(gate_reason),
+          owner:"(main)"} ]
      + [ (.secondmate_current.records // [])[] as $m
          | select($m.provenance.selected == "structured-home")
          | $m.queued[]?
-         | {id,title:(.title | trunc(60)),blocked_by:(.blocked_by // "-"),
-            reason:((.blocked_reason // "-") | trunc(40)),owner:$m.id} ]) as $gates_all
+         | {id,title:(.title | trunc(60)),blocked_by:(gate_by),reason:(gate_reason),
+            owner:$m.id} ]) as $gates_all
   | ([ .scout_reports[]
        | . as $r
        | select(($all_reports == 1) or (($rel_ids | index($r.id)) != null))

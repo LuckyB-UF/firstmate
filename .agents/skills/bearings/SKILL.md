@@ -24,7 +24,8 @@ It never tears down a task, merges a PR, dispatches new work, or mutates any tas
    When the captain asks to include PRs, use the command's live-PR opt-in; otherwise keep the default local-only read.
    If the command is unavailable, fall back to `bin/fm-fleet-snapshot.sh --json` and `bin/fm-crew-state.sh <id>`; never infer current state from a raw `tail` of `state/<id>.status`, which is append-only wake-event history whose last line goes stale.
    For registered secondmates, use the snapshot's structured-home classification and provenance; a parent event or bounded terminal contradiction is fallback evidence, never authority over readable structured home state.
-   A queued item under `gates` only becomes "next work" when its blocker is gone and its time/date gate has arrived; until then it stays queued with the reason.
+   A queued item under `gates` only becomes "next work" when it is not held, its blocker is gone, and its time/date gate has arrived; until then it stays queued with the reason.
+   A `hold` under `gates` gates the item whoever set it, and a captain-kind hold is Captain's Call content rather than Charted Next.
 
 2. **Compose the detailed report file around the four-section spine, adding the richer detail the chat leaves out.**
    The gather step is deterministic; your judgment is scoped to the last mile only - ranking the command's facts by what matters right now and writing the scannable prose.
