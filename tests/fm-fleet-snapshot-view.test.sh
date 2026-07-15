@@ -589,6 +589,37 @@ EOF
   pass "held backlog items are distinguishable from dispatchable queued work"
 }
 
+test_hold_reason_keeps_its_commas() {
+  local home data fakebin out
+  home=$(make_home holdcomma)
+  data=$TMP_ROOT/holdcomma-data
+  mkdir -p "$data"
+  cat > "$data/backlog.md" <<'EOF'
+## In flight
+
+## Queued
+- [ ] comma-item - Gated work (repo: demo) (hold: waiting on captain, then legal) (hold-kind: captain)
+
+## Done
+EOF
+  fakebin=$(make_fakebin "$home")
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_DATA_OVERRIDE="$data" "$SNAPSHOT" --json)
+  # A hold reason is free prose, so it must not be clipped at its first comma
+  # the way the single-token repo/kind/priority values legitimately are.
+  printf '%s' "$out" | jq -e '
+    .backlog.records[] | select(.id == "comma-item")
+    | .held == true
+      and .hold_reason == "waiting on captain, then legal"
+      and .hold_kind == "captain"
+      and .title == "Gated work"
+      and .repo == "demo"
+  ' >/dev/null || fail "a comma-containing hold reason was not parsed intact"
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_DATA_OVERRIDE="$data" "$VIEW")
+  printf '%s' "$out" | grep -q "held: waiting on captain, then legal (captain)" ||
+    fail "view clipped the hold reason at its comma"
+  pass "a hold reason survives its commas through snapshot and view"
+}
+
 test_empty_fleet_json
 test_fixture_snapshot_json
 test_event_hints_follow_reconciled_current_state
@@ -602,3 +633,4 @@ test_backlog_tasks_axi_forms_and_overrides
 test_view_renders_snapshot
 test_view_renders_dead_secondmate_agent_status
 test_held_backlog_item_is_distinguishable
+test_hold_reason_keeps_its_commas

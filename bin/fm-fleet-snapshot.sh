@@ -249,6 +249,8 @@ backlog_json() {  # [<backlog-path>] - defaults to this home's $BACKLOG
       cap($rest; ".*(?:\\(|,[[:space:]]*)" + $key + ":[[:space:]]*(?<v>[^,)]*)");
     def metadata_word($rest; $key):
       cap($rest; ".*(?:\\(|,[[:space:]]*)" + $key + "[[:space:]]+(?<v>[^,)]*)");
+    def hold_reason_of($rest):
+      cap($rest; ".*\\(hold:[[:space:]]*(?<v>[^)]*)\\)");
     def url_pattern: "https?://[^[:space:])\"<>]+";
     def wrapped_url_pattern: "<?" + url_pattern + ">?";
     def links($rest): [$rest | scan(url_pattern)];
@@ -309,9 +311,9 @@ backlog_json() {  # [<backlog-path>] - defaults to this home's $BACKLOG
              repo:metadata($rest; "repo"),
              kind:metadata($rest; "kind"),
              priority:metadata($rest; "priority"),
-             hold_reason:metadata($rest; "hold"),
+             hold_reason:hold_reason_of($rest),
              hold_kind:metadata($rest; "hold-kind"),
-             held:(metadata($rest; "hold") != null),
+             held:(hold_reason_of($rest) != null),
              blocked_by:cap($rest; ".*blocked-by:[[:space:]]*(?<v>[^[:space:])]+).*"),
              blocked_reason:blocked_reason($rest),
              since:metadata_word($rest; "since"),
