@@ -254,7 +254,7 @@ backlog_json() {  # [<backlog-path>] - defaults to this home's $BACKLOG
     def links($rest): [$rest | scan(url_pattern)];
     def strip_trailing_metadata:
       reduce range(0; 20) as $_ (.;
-        sub("[[:space:]]*\\([[:space:]]*(?:(?:repo|kind|priority):[[:space:]]*[^)]*|(?:since|merged|reported|done)[[:space:]]+[^)]*)[[:space:]]*\\)[[:space:]]*$"; ""));
+        sub("[[:space:]]*\\([[:space:]]*(?:(?:repo|kind|priority|hold-kind|hold):[[:space:]]*[^)]*|(?:since|merged|reported|done)[[:space:]]+[^)]*)[[:space:]]*\\)[[:space:]]*$"; ""));
     def strip_title_artifacts:
       sub("[[:space:]]+-[[:space:]]+data/[^[:space:])]+/report\\.md$"; "")
       | sub("[[:space:]]+data/[^[:space:])]+/report\\.md$"; "")
@@ -309,6 +309,9 @@ backlog_json() {  # [<backlog-path>] - defaults to this home's $BACKLOG
              repo:metadata($rest; "repo"),
              kind:metadata($rest; "kind"),
              priority:metadata($rest; "priority"),
+             hold_reason:metadata($rest; "hold"),
+             hold_kind:metadata($rest; "hold-kind"),
+             held:(metadata($rest; "hold") != null),
              blocked_by:cap($rest; ".*blocked-by:[[:space:]]*(?<v>[^[:space:])]+).*"),
              blocked_reason:blocked_reason($rest),
              since:metadata_word($rest; "since"),
