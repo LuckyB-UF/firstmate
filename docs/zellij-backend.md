@@ -20,7 +20,7 @@ Prerequisites:
 Select zellij by putting `zellij` in a local `config/backend` file - the durable way to pick it - or by exporting `FM_BACKEND=zellij` when you launch your harness for a one-off session; telling the first mate in chat to use zellij also works.
 Unlike tmux and herdr, zellij is **never** auto-detected - it always requires an explicit choice.
 A zellij spawn refuses loudly before creating a session container or acquiring a ship/scout worktree if `zellij` or `jq` is missing or the installed zellij is older than 0.44.
-For `--secondmate` launches, secondmate home sync and inherited-config propagation happen before this spawn-time backend gate.
+A `--secondmate` launch is refused outright, before any secondmate home sync or inherited-config propagation, because zellij's plain `dump-screen` capture cannot strip claude's ghost text from a secondmate composer; see the harness-adapters skill.
 
 No first-run provisioning is needed beyond having `zellij` and `jq` on `PATH`; firstmate creates the session and tab it needs on first spawn.
 
@@ -31,7 +31,7 @@ You do not need to attach for routine supervision: from an active firstmate sess
 
 Verify it works by spawning a trivial task with `--backend zellij` and confirming the task's meta records `backend=zellij` plus `zellij_session=`, `zellij_tab_id=`, and `zellij_pane_id=`; attaching to the session should show the new home-scoped tab title, such as `fm-firstmate-<8hex>-<id>`.
 
-Limitations: zellij is experimental, has no per-home workspace split (all tasks share one tab bar, unlike herdr), has no verified agent-process liveness classifier for the session-start secondmate sweep, and still carries the known gaps documented below (no native busy-state signal and a narrow focus-steal race on tab creation) - see "Known gaps left for a follow-up" at the end of this document.
+Limitations: zellij is experimental, does not support `--secondmate` spawns, has no per-home workspace split (all tasks share one tab bar, unlike herdr), has no verified agent-process liveness classifier for the session-start secondmate sweep of any legacy zellij secondmate endpoint, and still carries the known gaps documented below (no native busy-state signal and a narrow focus-steal race on tab creation) - see "Known gaps left for a follow-up" at the end of this document.
 
 ## Status: experimental
 

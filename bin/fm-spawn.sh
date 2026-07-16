@@ -23,7 +23,8 @@
 #   auto-detected tmux stays silent; zellij and orca are never auto-detected.
 #   codex-app is not a known backend yet; docs/codex-app-backend.md owns that
 #   blocked backend contract. Default tmux spawns do not write backend= to meta;
-#   absent backend= means tmux. cmux does not support --secondmate spawns yet.
+#   absent backend= means tmux. cmux and zellij do not support --secondmate
+#   spawns yet.
 #   A backend spawn refusal (missing dependency, version gate, unauthenticated
 #   socket, or unsupported secondmate mode) is terminal for that selected backend;
 #   callers must surface it instead of silently retrying another backend.
@@ -186,6 +187,10 @@ if [ "$BACKEND" = cmux ] && [ "$KIND" = secondmate ]; then
   echo "error: backend=cmux does not support --secondmate spawns yet" >&2
   exit 1
 fi
+if [ "$BACKEND" = zellij ] && [ "$KIND" = secondmate ]; then
+  echo "error: backend=zellij does not support --secondmate spawns yet" >&2
+  exit 1
+fi
 if [ "$BACKEND" = orca ]; then
   fm_backend_orca_runtime_check || exit 1
 fi
@@ -333,11 +338,9 @@ launch_template() {
     #     content, which every secondmate-reachable composer read routes through - the
     #     same backstop that already covers the captain's own firstmate pane, which this
     #     flag never reached either. The plain-screen readers that cannot strip ghost
-    #     styling are closed by two separate mechanisms, not one: orca and cmux refuse
-    #     --secondmate spawns outright above, while zellij accepts one and is covered
-    #     instead by its content-diff submit verification and its 'unknown' composer
-    #     state, which callers treat fail-safe. See the harness-adapters skill for the
-    #     contract those mechanisms satisfy.
+    #     styling - orca, cmux, and zellij - all refuse --secondmate spawns above, so no
+    #     secondmate can land on a reader without fm_composer_strip_ghost. See the
+    #     harness-adapters skill for the contract that rule satisfies.
     claude)
       if [ "$kind" = secondmate ]; then
         printf '%s' 'claude --dangerously-skip-permissions __MODELFLAG____EFFORTFLAG__"$(cat __BRIEF__)"'

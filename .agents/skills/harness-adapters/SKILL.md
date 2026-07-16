@@ -130,9 +130,7 @@ A claude crewmate (ship or scout) launches with the suggestion disabled: it is a
 A claude secondmate launches with the native suggestion enabled, because the captain reads and drives that window and should see it exactly as in their own session.
 The CLI's `--prompt-suggestions` flag is print/SDK-mode only and does not suppress the interactive composer ghost text, verified empirically on v2.1.186.
 Every pane the flag does not disable - a secondmate, and the captain's own firstmate composer that away-mode reads - relies on the shared `fm_composer_strip_ghost` extractor in `bin/fm-composer-lib.sh`, which removes dim/faint SGR 2 ghost runs before pending-input classification on both ANSI-capable readers (tmux and herdr).
-The plain-screen backends that cannot strip ghost styling are closed by two separate mechanisms, not one: orca and cmux refuse secondmate spawns in `bin/fm-spawn.sh`, while zellij does accept a secondmate spawn and is covered instead by its own two properties.
-Zellij verifies a submit by content diff rather than composer emptiness, and ghost text renders only in an empty composer, so a swallowed Enter that left real typed text still reads unchanged and retries.
-Zellij also has no named classifier, so `fm_backend_composer_state` reports `unknown` for it, and callers treat that fail-safe because a safe injection target must be affirmatively `empty`.
+The plain-screen backends that cannot strip ghost styling - orca, cmux, and zellij - all refuse `--secondmate` spawns in `bin/fm-spawn.sh`, so no secondmate can land on a reader without `fm_composer_strip_ghost`.
 That extractor's broader dark-TRUECOLOR placeholder handling and dark-theme tradeoff are documented in `docs/herdr-backend.md`'s 2026-07-10 incident record.
 That styled capture is internal to the boolean detector only.
 `fm-peek` and every other human or LLM-facing capture path stays plain `tmux capture-pane` with no escape codes.
