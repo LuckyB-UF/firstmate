@@ -130,10 +130,13 @@ A claude crewmate (ship or scout) launches with the suggestion disabled: it is a
 A claude secondmate launches with the native suggestion enabled, because the captain reads and drives that window and should see it exactly as in their own session.
 The CLI's `--prompt-suggestions` flag is print/SDK-mode only and does not suppress the interactive composer ghost text, verified empirically on v2.1.186.
 Every pane the flag does not disable - a secondmate, and the captain's own firstmate composer that away-mode reads - relies on the shared `fm_composer_strip_ghost` extractor in `bin/fm-composer-lib.sh`, which removes dim/faint SGR 2 ghost runs before pending-input classification on both ANSI-capable readers (tmux and herdr).
-The plain-screen backends that cannot strip ghost styling (orca and cmux) refuse secondmate spawns in `bin/fm-spawn.sh`, so no secondmate can land on a reader without that extractor.
-Its broader dark-TRUECOLOR placeholder handling and dark-theme tradeoff are documented in `docs/herdr-backend.md`'s 2026-07-10 incident record.
+The plain-screen backends that cannot strip ghost styling are closed by two separate mechanisms, not one: orca and cmux refuse secondmate spawns in `bin/fm-spawn.sh`, while zellij does accept a secondmate spawn and is covered instead by its own two properties.
+Zellij verifies a submit by content diff rather than composer emptiness, and ghost text renders only in an empty composer, so a swallowed Enter that left real typed text still reads unchanged and retries.
+Zellij also has no named classifier, so `fm_backend_composer_state` reports `unknown` for it, and callers treat that fail-safe because a safe injection target must be affirmatively `empty`.
+That extractor's broader dark-TRUECOLOR placeholder handling and dark-theme tradeoff are documented in `docs/herdr-backend.md`'s 2026-07-10 incident record.
 That styled capture is internal to the boolean detector only.
 `fm-peek` and every other human or LLM-facing capture path stays plain `tmux capture-pane` with no escape codes.
+Note for a future reader: because those paths are plain, a peek of an IDLE secondmate can render its predicted next prompt as apparent typed input, bounded by AGENTS.md forbidding reads of a secondmate's chat and by the documented post-spawn trust-dialog peek above happening while the agent is still processing its charter, before any ghost renders.
 
 **Primary-session guard fact (verified 2026-07-04, Claude Code 2.1.201; preserved 2026-07-08, Claude Code 2.1.204).**
 This is separate from the per-task crewmate turn-end hook above (that one just `touch`es a marker file in a task's own `.claude/settings.local.json`).

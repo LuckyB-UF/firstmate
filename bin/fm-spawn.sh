@@ -332,9 +332,12 @@ launch_template() {
     #     (bin/fm-composer-lib.sh), the one fleet-wide ANSI-aware extractor of real typed
     #     content, which every secondmate-reachable composer read routes through - the
     #     same backstop that already covers the captain's own firstmate pane, which this
-    #     flag never reached either. The plain-screen backends that cannot strip ghost
-    #     styling (orca, cmux) refuse --secondmate spawns outright above, so no
-    #     secondmate can land on a reader without it.
+    #     flag never reached either. The plain-screen readers that cannot strip ghost
+    #     styling are closed by two separate mechanisms, not one: orca and cmux refuse
+    #     --secondmate spawns outright above, while zellij accepts one and is covered
+    #     instead by its content-diff submit verification and its 'unknown' composer
+    #     state, which callers treat fail-safe. See the harness-adapters skill for the
+    #     contract those mechanisms satisfy.
     claude)
       if [ "$kind" = secondmate ]; then
         printf '%s' 'claude --dangerously-skip-permissions __MODELFLAG____EFFORTFLAG__"$(cat __BRIEF__)"'
