@@ -316,15 +316,32 @@ launch_template() {
   # shellcheck disable=SC2016  # single quotes are deliberate: $(cat ...) expands in the crewmate pane, not here
   case "$harness" in
     # CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false disables claude's interactive
-    # predicted-next-prompt ghost text, which renders as dim/faint text inside an
-    # otherwise-empty composer and would otherwise read like real typed input when
-    # firstmate captures the pane (see the harness-adapters skill). It is a per-launch env
-    # prefix scoped to this firstmate-launched agent; it never touches the captain's
-    # global config. The CLI's --prompt-suggestions flag is print/SDK-mode only and
-    # does NOT suppress the interactive ghost text (verified empirically), so the env
-    # var is the correct control. The dim-aware composer reader in fm-tmux-lib.sh is
-    # the defense-in-depth backstop for any pane this flag cannot reach.
-    claude) printf '%s' 'CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions __MODELFLAG____EFFORTFLAG__"$(cat __BRIEF__)"' ;;
+    # predicted-next-prompt ghost text, which renders as dim/faint (SGR 2) text inside
+    # an otherwise-empty composer. It is a per-launch env prefix scoped to this
+    # firstmate-launched agent; it never touches the captain's global config. The CLI's
+    # --prompt-suggestions flag is print/SDK-mode only and does NOT suppress the
+    # interactive ghost text (verified empirically), so the env var is the correct control.
+    #
+    # The prefix is applied per KIND, because the suggestion's value and its cost differ:
+    #   ship/scout - DISABLED. An autonomous crewmate is a worker the captain never
+    #     drives from its own composer, so the suggestion has no reader to help and is
+    #     pure classifier risk.
+    #   secondmate - ENABLED (no prefix). A secondmate is a captain-facing agent the
+    #     captain does read and drive, so it shows the native suggestion exactly as the
+    #     captain's own session does. Safety rests on the shared fm_composer_strip_ghost
+    #     (bin/fm-composer-lib.sh), the one fleet-wide ANSI-aware extractor of real typed
+    #     content, which every secondmate-reachable composer read routes through - the
+    #     same backstop that already covers the captain's own firstmate pane, which this
+    #     flag never reached either. The plain-screen backends that cannot strip ghost
+    #     styling (orca, cmux) refuse --secondmate spawns outright above, so no
+    #     secondmate can land on a reader without it.
+    claude)
+      if [ "$kind" = secondmate ]; then
+        printf '%s' 'claude --dangerously-skip-permissions __MODELFLAG____EFFORTFLAG__"$(cat __BRIEF__)"'
+      else
+        printf '%s' 'CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions __MODELFLAG____EFFORTFLAG__"$(cat __BRIEF__)"'
+      fi
+      ;;
     codex)
       if [ "$kind" = secondmate ]; then
         printf '%s' 'codex __MODELFLAG____EFFORTFLAG__--dangerously-bypass-approvals-and-sandbox "$(cat __BRIEF__)"'

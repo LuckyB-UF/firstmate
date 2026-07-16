@@ -15,6 +15,14 @@
 #      pending, while still treating real (normal/bright) text as pending.
 #   3. The human/LLM-facing capture path (fm-peek.sh) stays PLAIN - no escape codes
 #      ever reach firstmate's context.
+#
+# These guarantees are LOAD-BEARING, not belt-and-braces: a claude SECONDMATE now
+# launches with the native predicted-next-prompt suggestion ENABLED (it is a
+# captain-facing window the captain reads and drives), so its idle composer really
+# does hold dim SGR 2 ghost text and this extractor is the only thing keeping that
+# out of the pending-input verdict. bin/fm-spawn.sh still disables the suggestion
+# for ship/scout crewmates; the kind split is pinned by
+# tests/fm-spawn-dispatch-profile.test.sh.
 set -u
 
 # shellcheck source=tests/lib.sh
