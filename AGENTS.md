@@ -758,10 +758,12 @@ Adjust the other sections only when the task genuinely deviates from the standar
 
 ## 12. Self-update
 
-firstmate is its own repo behind the no-mistakes gate, so improvements to `AGENTS.md`, `bin/`, `.agents/skills/`, and public `skills/` reach `main` and then wait for each running firstmate to pull them.
+This fleet runs a fork: `origin` is the shared upstream, and `fork/main` carries upstream plus this fleet's private adaptations.
+Every home runs `fork/main`, so an improvement reaches a running home only after it is on `fork/main` and that home fast-forwards to it; upstream enters only by being merged into `fork/main`.
+Never advance a home from origin, which would strip the fleet's adaptations.
 Only `AGENTS.md`, `bin/`, and `.agents/skills/` are a running firstmate instruction surface; public `skills/` is tracked for installers and is not loaded by firstmate.
 When the captain invokes `/updatefirstmate` or asks to update firstmate, load the `/updatefirstmate` skill.
-It performs only fast-forward self-updates of firstmate and registered secondmate homes, re-reads `AGENTS.md` when needed, nudges updated live secondmates, and never touches anything under `projects/`.
+It merges upstream into `fork/main`, performs only fast-forward self-updates of firstmate and registered secondmate homes from `fork/main`, re-reads `AGENTS.md` when needed, nudges updated live secondmates, and never touches anything under `projects/`.
 
 ## 13. Agent-only reference skills
 

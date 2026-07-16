@@ -1,6 +1,6 @@
 ---
 name: updatefirstmate
-description: Self-update a running firstmate and its secondmates to the latest from origin. Use when the captain invokes /updatefirstmate (e.g. "/updatefirstmate", "update firstmate", "pull the latest firstmate"). Fast-forwards this firstmate repo's default branch and every secondmate home from origin (fast-forward only, never forced, never disruptive), then re-reads AGENTS.md and nudges each updated secondmate to do the same, so the whole tree runs the latest bin/ and instructions.
+description: Self-update a running firstmate and its secondmates to the latest from this fleet's fork. Use when the captain invokes /updatefirstmate (e.g. "/updatefirstmate", "update firstmate", "pull the latest firstmate"). Merges upstream origin into fork/main, then fast-forwards this firstmate repo's default branch and every secondmate home to the fork (fast-forward only, never forced, never disruptive), then re-reads AGENTS.md and nudges each updated secondmate to do the same, so the whole tree runs the latest bin/ and instructions.
 user-invocable: true
 metadata:
   internal: true
@@ -9,12 +9,21 @@ metadata:
 # updatefirstmate
 
 Self-update firstmate in place.
-Firstmate is its own repo, behind the same no-mistakes gate as any project, so new tracked material (`AGENTS.md`, `bin/`, `.agents/skills/`, and public `skills/`) reaches `main` and then sits there until each running firstmate pulls it.
-Only `AGENTS.md`, `bin/`, and `.agents/skills/` are a running firstmate instruction surface; public `skills/` is installer-facing and is not loaded by firstmate.
-This skill performs that pull for the running main firstmate and every secondmate, without disturbing any in-flight work.
 
-The update is **fast-forward only** - the same sanctioned self-write as the fleet sync firstmate already runs.
-It never forces, never creates a merge commit, never stashes, and advances a target only on a clean fast-forward; anything dirty, diverged, offline, or on the wrong branch is skipped and reported.
+This fleet runs a **fork**, so an update is two hops, never one:
+
+- `origin` is the shared upstream that many fleets pull from.
+- `fork` is this fleet's own remote, and `fork/main` carries upstream **plus this fleet's private adaptations**.
+- Every home runs `fork/main`.
+
+Upstream therefore enters only by being merged **into** `fork/main`, and each home then fast-forwards to `fork/main`.
+A home is never advanced from origin: that would strip the fleet's adaptations, which is exactly what the fork exists to keep.
+Only `AGENTS.md`, `bin/`, and `.agents/skills/` are a running firstmate instruction surface; public `skills/` is installer-facing and is not loaded by firstmate.
+This skill performs that update for the running main firstmate and every secondmate, without disturbing any in-flight work.
+
+The home advance is **fast-forward only** - the same sanctioned self-write as the fleet sync firstmate already runs.
+It never forces, never stashes, and advances a target only on a clean fast-forward; anything dirty, diverged, offline, or on the wrong branch is skipped and reported.
+The one commit an update may create is the upstream merge on `fork/main`, and a conflicting merge stops the run instead of forcing it.
 A tracked-files fast-forward leaves the gitignored operational dirs (data/, state/, config/, projects/, .no-mistakes/) untouched, so a secondmate's in-flight work is never disrupted.
 This touches only the firstmate repo and its own worktrees, never anything under `projects/`.
 
@@ -24,10 +33,14 @@ This touches only the firstmate repo and its own worktrees, never anything under
    ```sh
    bin/fm-update.sh
    ```
-   It fast-forwards this firstmate repo's default branch from origin, then fast-forwards every registered secondmate home (each a treehouse worktree of this same repo, leased at a detached HEAD on the default branch) the same way.
-   It prints one status line per target (`updated <old>..<new>` / `already current` / `skipped: <reason>`), followed by two action lines that tell you exactly what to do next:
+   It merges `origin/main` into `fork/main` and pushes the result to the fork, then fast-forwards this firstmate repo's default branch to `fork/main`, then fast-forwards every registered secondmate home (each a treehouse worktree of this same repo, leased at a detached HEAD on the default branch) the same way.
+   It prints one `upstream: ...` ingest line, one status line per target (`updated <old>..<new>` / `already current` / `skipped: <reason>`), followed by two action lines that tell you exactly what to do next:
    - `reread-firstmate: yes|no`
    - `nudge-secondmates: fm-<id>...|none`
+
+   **If the ingest hits a conflict it stops and exits non-zero**, printing each conflicted path.
+   Nothing was pushed and no home moved, so the fleet is simply still on its previous version - it is not half-updated.
+   This is a captain-facing decision, not something to force past: report the conflicted paths and let the captain decide how upstream and the fleet's adaptations should be reconciled.
 
 2. **Re-read AGENTS.md if your own instructions changed.**
    When the updater printed `reread-firstmate: yes`, the tracked instruction surface (`AGENTS.md`, `bin/`, or `.agents/skills/`) just advanced under you.
@@ -50,9 +63,14 @@ This touches only the firstmate repo and its own worktrees, never anything under
 
 ## Safety
 
-- **Fast-forward only.**
+- **Fast-forward only for every home.**
   A target that has diverged, is dirty, is offline, or is on a non-default branch is skipped and reported, never forced or stashed.
   Nothing with unlanded work is ever discarded - this is prime directive #3.
+- **Never advance a home from origin.**
+  Homes track the fork; origin reaches them only through the `fork/main` merge.
+  An origin advance would silently strip the fleet's adaptations.
+- **A conflicting ingest stops the run.**
+  It is never forced and never partially applied: the fork keeps its tip and every home stays where it is.
 - **Only the firstmate repo and its worktrees** are touched, never `projects/`.
   It is the same sanctioned self-write as the fleet sync.
 - **Secondmates are never disrupted.**
