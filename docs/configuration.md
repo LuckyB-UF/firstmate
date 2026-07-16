@@ -48,7 +48,9 @@ See [`docs/cmux-backend.md`](cmux-backend.md#runtime-auto-detection) for why cmu
 Auto-detected herdr or cmux prints a stderr notice naming `config/backend` and `--backend tmux` as opt-outs; auto-detected tmux stays silent to preserve existing default behavior.
 Zellij and Orca are never auto-detected; select them by putting the name in a local `config/backend` file, by exporting `FM_BACKEND=<name>`, or by telling the first mate in chat.
 Any value other than `tmux`, `herdr`, `zellij`, `orca`, or `cmux` is rejected until another adapter is implemented and verified.
-`fm-spawn.sh` accepts `tmux`, `herdr`, `zellij`, `orca`, and `cmux` for ship and scout tasks; `backend=orca`, `backend=cmux`, and `backend=zellij` all still refuse `--secondmate`: they are plain-screen readers with no ANSI channel, so they cannot strip claude's ghost text through the shared `fm_composer_strip_ghost`.
+`fm-spawn.sh` accepts `tmux`, `herdr`, `zellij`, `orca`, and `cmux` for ship and scout tasks; `backend=orca`, `backend=cmux`, and `backend=zellij` all still refuse `--secondmate`, for two distinct reasons.
+`backend=orca` and `backend=cmux` refuse until secondmate launch semantics are designed for each.
+`backend=zellij` refuses because it is a plain-screen reader with no ANSI channel, so it cannot strip claude's native prompt-suggestion ghost text through the shared `fm_composer_strip_ghost`.
 `codex-app` is not an accepted runtime backend yet; [`docs/codex-app-backend.md`](codex-app-backend.md) owns the Codex App boundary.
 The session-start secondmate liveness sweep uses a deeper `fm_backend_agent_alive` probe where verified.
 Today that probe can classify tmux and herdr secondmate endpoints as `alive`, `dead`, or `unknown`; zellij, Orca, and cmux report `unknown` until their own agent-process classifiers are verified.
