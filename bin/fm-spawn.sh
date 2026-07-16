@@ -23,8 +23,8 @@
 #   auto-detected tmux stays silent; zellij and orca are never auto-detected.
 #   codex-app is not a known backend yet; docs/codex-app-backend.md owns that
 #   blocked backend contract. Default tmux spawns do not write backend= to meta;
-#   absent backend= means tmux. cmux and zellij do not support --secondmate
-#   spawns yet.
+#   absent backend= means tmux. orca, cmux, and zellij do not support
+#   --secondmate spawns yet.
 #   A backend spawn refusal (missing dependency, version gate, unauthenticated
 #   socket, or unsupported secondmate mode) is terminal for that selected backend;
 #   callers must surface it instead of silently retrying another backend.
@@ -179,17 +179,13 @@ else
 fi
 fm_backend_validate_spawn "$BACKEND" || exit 1
 fm_backend_source "$BACKEND" || exit 1
-if [ "$BACKEND" = orca ] && [ "$KIND" = secondmate ]; then
-  echo "error: backend=orca does not support --secondmate spawns yet" >&2
-  exit 1
-fi
-if [ "$BACKEND" = cmux ] && [ "$KIND" = secondmate ]; then
-  echo "error: backend=cmux does not support --secondmate spawns yet" >&2
-  exit 1
-fi
-if [ "$BACKEND" = zellij ] && [ "$KIND" = secondmate ]; then
-  echo "error: backend=zellij does not support --secondmate spawns yet" >&2
-  exit 1
+if [ "$KIND" = secondmate ]; then
+  case "$BACKEND" in
+    orca | cmux | zellij)
+      echo "error: backend=$BACKEND does not support --secondmate spawns yet" >&2
+      exit 1
+      ;;
+  esac
 fi
 if [ "$BACKEND" = orca ]; then
   fm_backend_orca_runtime_check || exit 1

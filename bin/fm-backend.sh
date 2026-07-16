@@ -705,12 +705,12 @@ fm_backend_target_exists() {  # <backend> <target> [expected-label]
 #   dead    - CONFIDENTLY not an agent: a bare shell (tmux) or a
 #             structurally-gone/no-agent-registered pane (herdr).
 #   unknown - anything ambiguous, unreadable, or unverified for this backend.
-# Scoped to today's --secondmate-spawn-capable backends with an empirically
-# verified classifier: tmux (docs/tmux-backend.md "Agent liveness probe") and
-# herdr (docs/herdr-backend.md "Agent liveness probe reuses the husk
-# classifier"). zellij, orca, and cmux report unknown until independently
-# verified - future work, not a functional gap for the two backends
-# --secondmate spawns actually support today plus tmux's reference path.
+# tmux and herdr are exactly today's --secondmate-spawn-capable backends, and
+# both have an empirically verified classifier: docs/tmux-backend.md "Agent
+# liveness probe" and docs/herdr-backend.md "Agent liveness probe reuses the
+# husk classifier". zellij, orca, and cmux report unknown until independently
+# verified; since fm-spawn.sh refuses --secondmate on all three, that is an
+# ordinary-crewmate gap, never a secondmate one.
 # Callers must treat unknown exactly like an unreadable target: NEVER license
 # an action from it alone - the secondmate-liveness sweep gates a respawn on
 # `dead` only, precisely so a momentary read glitch can never duplicate a
