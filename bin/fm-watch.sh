@@ -868,6 +868,7 @@ EOF
       if [ "$n" -ge 2 ] && ! window_is_busy "$w" "$tail40"; then
         # The pane is idle/stale at hash $h. Triage decides whether this wakes
         # firstmate. Detection itself is unchanged from above.
+        # Not dead code: a claude secondmate's native prompt suggestion churns its idle pane, so a paused one usually reaches handle_paused_stale via the hash-changed branch below, but a static paused pane still arrives here.
         if [ "$kind" = secondmate ]; then
           case "$(pause_state_class "$w" "$task")" in
             paused) handle_paused_stale "$w" "$task" "$h" ;;
