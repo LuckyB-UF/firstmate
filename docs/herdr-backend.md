@@ -744,7 +744,7 @@ The herdr incident regressions (`tests/fm-backend-herdr.test.sh`'s composer-stat
 The captain woke to find away-mode had never injected: 20 escalations buffered, the max-defer wedge marker at 30623s undelivered, the wake queue at 65.
 Daemon triage and buffering worked perfectly; the injection leg deferred EVERY attempt with `inject deferred: supervisor pane has pending input (non-empty composer)` - 6524 lifetime occurrences in the daemon log, 2144 of them from the single overnight daemon (`pid 94088`, `backend=herdr`, `target=default:w1:p3`), dominating every other defer reason.
 
-**Root cause.** The primary firstmate runs claude, and claude-code renders a rotating prompt SUGGESTION as ghost text in an otherwise-empty composer (the primary does not set `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false`; crews do, via `fm-spawn`, so crew panes never show it).
+**Root cause.** The primary firstmate runs claude, and claude-code renders a rotating prompt SUGGESTION as ghost text in an otherwise-empty composer (the primary does not set `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false`; ship/scout crewmates do, via `fm-spawn`, so their panes never show it).
 Captured read-only from the live primary pane (no Herdr lifecycle touched):
 
 ```
