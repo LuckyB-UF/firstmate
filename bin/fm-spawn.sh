@@ -58,6 +58,13 @@
 #   default-branch commit when safe; skipped syncs warn and launch unchanged.
 #   Ship/scout spawns refuse to launch unless the resolved task path is a real
 #   git worktree root distinct from the primary project checkout.
+#   Task metadata written to state/<id>.meta: window=, worktree=, project=,
+#   harness=, model=, effort=, kind=, mode=, yolo=, tasktmp=. A kind=secondmate
+#   spawn also records home= and projects=; a non-default runtime backend records
+#   further backend-specific fields (docs/configuration.md "Runtime backend";
+#   bin/fm-backend.sh). fm-pr-check later appends canonical pr=/pr_head=, and
+#   fm-x-link appends the X-mode fields for an X-mode-originated task (AGENTS.md
+#   section 14).
 # Batch dispatch: pass one or more `id=repo` pairs instead of a single <id> <project>, e.g.
 #     fm-spawn.sh fix-a-k3=projects/foo add-b-q7=projects/bar [--scout]
 #   Each pair re-execs this script in single-task mode, so the single path stays the only
@@ -85,7 +92,7 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
-  sed -n '2,78p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,85p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 case "${1:-}" in

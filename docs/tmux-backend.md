@@ -113,5 +113,5 @@ Resolving this would need either a `pi`-specific env marker inspectable from out
 
 ## Limitations
 
-None specific to tmux for the reference path itself - it is the fully verified reference backend, while Orca and cmux are the backends without secondmate support.
+None specific to tmux for the reference path itself - it is the fully verified reference backend, while Orca, cmux, and zellij are the backends without secondmate support.
 The agent-liveness probe above has one known gap (`pi`'s generic `node` process name, see above).

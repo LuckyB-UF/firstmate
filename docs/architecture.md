@@ -241,7 +241,7 @@ The refresh also prunes local branches whose remote is gone and that no worktree
 `/updatefirstmate` merges upstream `origin/main` into this fleet's `fork/main`, fast-forwards the running firstmate repo and registered secondmate homes to `fork/main`, then re-reads updated instructions and nudges updated secondmates without touching project clones.
 Homes track the fork, never origin, so the fleet's private adaptations survive an upstream ingest.
 The update is fast-forward only: dirty, diverged, offline, and off-default targets are reported and left untouched.
-The origin-based updater and the local secondmate sync share the same guarded fast-forward helper; only the origin mode fetches.
+The fork-based home advance and the local secondmate sync share the same guarded fast-forward helper; the remote base modes (the fork advance and the origin ingest) fetch, while the local secondmate sync never does.
 The mechanics are owned by the `/updatefirstmate` skill and firstmate's operating manual in [`AGENTS.md`](../AGENTS.md) (self-update).
 
 ## Restart-proof
