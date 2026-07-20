@@ -504,17 +504,23 @@ canonical_existing_dir() {
 #   - LEASED to any holder -> REFUSE. A crewmate/scout worktree is acquired
 #     interactively and is never leased, so a lease on its recorded path proves a
 #     different, durable owner took the slot.
-#   - 'available' or the self-occupied "you're here" state -> proceed. Treehouse
-#     marks a slot 'available' when its interactive owner dies, which is exactly
-#     the common post-outage "dead task, slot not reused" recovery case.
-#   - ANY OTHER state (in-use, busy, or any unrecognized/future non-free word) ->
-#     treat as possibly-owned: proceed only when THIS task's own agent PROCESS is
-#     CONFIDENTLY still alive (fm_backend_agent_alive == alive; the live owner is
-#     us and treehouse never re-hands a live-owned slot); a 'dead' or 'unknown'
-#     reading REFUSES, since a live/held slot without our own confirmed agent
-#     cannot be proven ours. A lingering bare shell (which the weaker
-#     pane-presence probe would accept) is NOT enough - that is exactly the
-#     re-handed-slot hazard this guard exists to catch.
+#   - 'available' -> proceed. Treehouse marks a slot 'available' when its
+#     interactive owner dies, which is exactly the common post-outage "dead task,
+#     slot not reused" recovery case.
+#   - A KNOWN-occupied state (in-use or a busy variant) -> treat as possibly
+#     re-handed and decide by THIS task's own agent liveness. Where
+#     fm_backend_agent_alive is authoritative (tmux/herdr) proceed only on a
+#     confident 'alive' and REFUSE on 'dead' - a live/held slot without our own
+#     confirmed agent is the re-handed-slot hazard, and a lingering bare shell
+#     (which the weaker pane-presence probe would accept) is NOT enough. Where
+#     that probe cannot classify the backend and returns 'unknown' (zellij, cmux,
+#     others), fall back to pane PRESENCE via fm_backend_target_exists so a
+#     legitimate teardown on those backends is not blocked by the probe gap:
+#     proceed when the recorded endpoint still exists, refuse when it is gone.
+#   - ANY OTHER (unrecognized/future non-free) state -> REFUSE. An unknown STATE
+#     cannot be proven still ours, so it fails CLOSED; this is distinct from an
+#     unknown AGENT-liveness on a known-occupied slot, which falls back rather
+#     than blocking.
 #
 # Scope: interactive treehouse worktrees only. Orca worktrees (backend=orca) are
 # handled by their own path-match guard. Secondmate homes are leased durably
@@ -578,15 +584,43 @@ assert_treehouse_worktree_owner() {
         echo "The recorded worktree pointer is stale - its slot was re-handed after an outage. Returning it would destroy another task's work. Preserving task state." >&2
         return 1
         ;;
-      available|*here*)
+      available)
         return 0
         ;;
+      in-use|in_use|inuse|*busy*)
+        # A matched KNOWN-occupied slot (in-use or a busy variant). Decide by
+        # THIS task's own agent liveness on two INDEPENDENT axes. Where
+        # fm_backend_agent_alive is authoritative (tmux/herdr) proceed only on a
+        # confident 'alive' and refuse on 'dead' - a live/held slot without our
+        # own confirmed agent is exactly the re-handed-slot hazard. Where it
+        # returns 'unknown' (zellij/cmux/other, which it cannot probe) fall back
+        # to pane PRESENCE via fm_backend_target_exists: proceed when the
+        # recorded endpoint still exists, refuse when it is gone, so a legitimate
+        # teardown on those backends is never blocked by the probe gap. Unknown
+        # AGENT-liveness therefore falls back, never blocks; only an unrecognized
+        # STATE (below) refuses outright.
+        case "$(fm_backend_agent_alive "$BACKEND" "$T")" in
+          alive)
+            return 0
+            ;;
+          dead)
+            echo "REFUSED: teardown of task $ID targets worktree $wt, but treehouse reports that pool slot held by another process (state '$sstate') while this task's own agent is gone." >&2
+            echo "The recorded worktree pointer is stale - its slot was re-handed after an outage. Returning it would kill the live owner. Preserving task state." >&2
+            return 1
+            ;;
+          *)
+            if fm_backend_target_exists "$BACKEND" "$T"; then
+              return 0
+            fi
+            echo "REFUSED: teardown of task $ID targets worktree $wt, but treehouse reports that pool slot held by another process (state '$sstate') while this task's own agent is gone." >&2
+            echo "The recorded worktree pointer is stale - its slot was re-handed after an outage. Returning it would kill the live owner. Preserving task state." >&2
+            return 1
+            ;;
+        esac
+        ;;
       *)
-        if [ "$(fm_backend_agent_alive "$BACKEND" "$T")" = alive ]; then
-          return 0
-        fi
-        echo "REFUSED: teardown of task $ID targets worktree $wt, but treehouse reports that pool slot held by another process (state '$sstate') while this task's own agent is gone." >&2
-        echo "The recorded worktree pointer is stale - its slot was re-handed after an outage. Returning it would kill the live owner. Preserving task state." >&2
+        echo "REFUSED: teardown of task $ID targets worktree $wt, but treehouse reports that pool slot in an unrecognized state '$sstate', which cannot be proven to still belong to this task." >&2
+        echo "Refusing rather than risk returning a slot that was re-handed after an outage and destroying another task's work. Preserving task state." >&2
         return 1
         ;;
     esac

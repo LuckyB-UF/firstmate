@@ -454,6 +454,26 @@ SH
   chmod +x "$case_dir/fakebin/tmux"
 }
 
+# The task uses the zellij backend, whose agent-liveness probe returns 'unknown'
+# (fm_backend_agent_alive cannot classify zellij), so the guard must fall back to
+# pane PRESENCE via fm_backend_target_exists. This mock answers the two passive
+# readiness queries (session list and pane list) so that fallback resolves to
+# "present". Args: case_dir
+add_zellij_present_pane() {
+  local case_dir=$1
+  cat > "$case_dir/fakebin/zellij" <<'SH'
+#!/usr/bin/env bash
+for a in "$@"; do
+  case "$a" in
+    list-sessions) echo sess1; exit 0 ;;
+    list-panes) echo '[{"id":3,"is_plugin":false,"tab_id":1}]'; exit 0 ;;
+  esac
+done
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/zellij"
+}
+
 git_index_lock_path() {
   local dir=$1 lock abs_dir
   lock=$(git -C "$dir" rev-parse --git-path index.lock)
@@ -1497,14 +1517,15 @@ test_force_does_not_bypass_reused_slot_guard() {
 }
 
 # A state word that merely CONTAINS "lease" as a substring (e.g. "released") is
-# NOT a lease. It must fall through to the possibly-owned branch rather than
-# being misclassified and refused with a misleading "leased to unknown" message.
-# With this task's own agent live, the fall-through proceeds.
+# NOT a lease. It must NOT be refused with a misleading "leased to unknown"
+# message; instead it is an UNRECOGNIZED state and fails closed with the
+# unrecognized-state refusal that names the state.
 test_released_substring_state_is_not_treated_as_leased() {
   local case_dir rc
   case_dir=$(make_case released-not-leased)
   write_meta "$case_dir" no-mistakes ship
-  # No unpushed work; default tmux mock reports this task's own agent alive.
+  # Default tmux mock reports this task's own agent alive, proving the refusal is
+  # driven by the unrecognized STATE, not by a dead agent.
   add_slot_status_treehouse "$case_dir" released ""
 
   set +e
@@ -1512,9 +1533,11 @@ test_released_substring_state_is_not_treated_as_leased() {
   rc=$?
   set -e
 
-  expect_code 0 "$rc" "released-not-leased: a 'released' state must not be refused as a lease"
+  expect_code 1 "$rc" "released-not-leased: an unrecognized 'released' state must fail closed"
   ! grep -q "leased to" "$case_dir/stderr" || fail "released-not-leased: 'released' was misclassified as a lease"
-  pass "teardown does not treat a 'released' substring state as a lease"
+  assert_grep "released" "$case_dir/stderr" "released-not-leased: refusal should name the unrecognized state"
+  assert_absent "$case_dir/return-attempted" "released-not-leased: teardown must NOT return an unrecognized-state slot"
+  pass "teardown treats a 'released' substring state as an unrecognized state and fails closed"
 }
 
 test_owned_slot_teardown_proceeds() {
@@ -1537,6 +1560,66 @@ test_owned_slot_teardown_proceeds() {
   pass "teardown proceeds as before when the recorded slot is still owned by this task"
 }
 
+# A zellij-backed task's own slot reports 'in-use' (occupied), and
+# fm_backend_agent_alive cannot classify zellij, so it returns 'unknown'. The
+# guard must NOT block on that: it falls back to pane PRESENCE and, with the
+# recorded endpoint still live, proceeds - a normal zellij teardown is never
+# stuck behind the two-backend liveness probe.
+test_zellij_in_use_present_pane_proceeds() {
+  local case_dir rc
+  case_dir=$(make_case zellij-inuse-present)
+  fm_write_meta "$case_dir/state/task-x1.meta" \
+    "window=sess1:3" \
+    "worktree=$case_dir/wt" \
+    "project=$case_dir/project" \
+    "kind=ship" \
+    "mode=no-mistakes" \
+    "backend=zellij"
+  # No unpushed work (HEAD is the origin baseline), so the guard's liveness
+  # fallback is what governs the outcome.
+  add_slot_status_treehouse "$case_dir" in-use ""
+  add_zellij_present_pane "$case_dir"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 0 "$rc" "zellij-inuse-present: teardown should proceed when the pane is still present"
+  ! grep -q REFUSED "$case_dir/stderr" || fail "zellij-inuse-present: teardown wrongly refused a live zellij slot"
+  assert_present "$case_dir/return-attempted" "zellij-inuse-present: teardown should return its own zellij worktree"
+  pass "teardown of a zellij occupied slot proceeds via presence fallback when agent-liveness is unknown"
+}
+
+# The same zellij fallback in the refuse direction: an occupied slot whose
+# recorded endpoint is GONE cannot be proven ours, so the presence fallback
+# refuses rather than returning a possibly re-handed slot.
+test_zellij_in_use_absent_pane_refuses() {
+  local case_dir rc
+  case_dir=$(make_case zellij-inuse-absent)
+  fm_write_meta "$case_dir/state/task-x1.meta" \
+    "window=sess1:3" \
+    "worktree=$case_dir/wt" \
+    "project=$case_dir/project" \
+    "kind=ship" \
+    "mode=no-mistakes" \
+    "backend=zellij"
+  wt_commit "$case_dir" "work"
+  add_slot_status_treehouse "$case_dir" in-use ""
+  # No zellij mock: the session/pane queries fail, so presence resolves to absent.
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "zellij-inuse-absent: teardown must refuse when the endpoint is gone"
+  assert_grep "REFUSED" "$case_dir/stderr" "zellij-inuse-absent: expected a REFUSED line"
+  assert_grep "another process" "$case_dir/stderr" "zellij-inuse-absent: refusal should cite the foreign owner"
+  assert_absent "$case_dir/return-attempted" "zellij-inuse-absent: teardown must NOT return a possibly re-handed slot"
+  pass "teardown of a zellij occupied slot refuses via presence fallback when the endpoint is gone"
+}
+
 test_local_only_fork_remote_allows
 test_reused_slot_leased_to_other_task_refuses
 test_reused_slot_leased_spaced_path_refuses
@@ -1547,6 +1630,8 @@ test_reused_slot_unknown_state_with_dead_endpoint_refuses
 test_available_slot_with_dead_endpoint_proceeds
 test_force_does_not_bypass_reused_slot_guard
 test_owned_slot_teardown_proceeds
+test_zellij_in_use_present_pane_proceeds
+test_zellij_in_use_absent_pane_refuses
 test_teardown_prompts_tasks_axi_done_when_compatible
 test_teardown_manual_backend_prompts_hand_edit_even_when_tasks_axi_present
 test_local_only_truly_unpushed_refuses
