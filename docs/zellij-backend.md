@@ -20,7 +20,7 @@ Prerequisites:
 Select zellij by putting `zellij` in a local `config/backend` file - the durable way to pick it - or by exporting `FM_BACKEND=zellij` when you launch your harness for a one-off session; telling the first mate in chat to use zellij also works.
 Unlike tmux and herdr, zellij is **never** auto-detected - it always requires an explicit choice.
 A zellij spawn refuses loudly before creating a session container or acquiring a ship/scout worktree if `zellij` or `jq` is missing or the installed zellij is older than 0.44.
-A `--secondmate` launch is refused outright, before any secondmate home sync or inherited-config propagation, because zellij's plain `dump-screen` capture cannot strip claude's ghost text from a secondmate composer; see the harness-adapters skill.
+A `--secondmate` launch is refused outright, before any secondmate home sync or inherited local-material propagation, because zellij's plain `dump-screen` capture cannot strip claude's ghost text from a secondmate composer; see the harness-adapters skill.
 No legacy zellij secondmate is expected in the wild, because the zellij backend is experimental and explicit-choice-only - it is never selected by runtime auto-detection.
 Should a pre-existing one exist, teardown still works, so the migration is to retire it and recreate it on tmux.
 

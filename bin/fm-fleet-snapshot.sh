@@ -15,6 +15,8 @@
 #     data/backlog.md and cover In flight, Queued, and Done.
 #     Canonical tasks-axi rows are structured; free-form non-empty lines in
 #     those sections are preserved as unstructured records.
+#     Structured rows preserve captain-hold metadata such as hold_kind and
+#     hold_reason when tasks-axi emits it.
 #   tasks[]: one row per state/<id>.meta, sorted by id.
 #     current_state is parsed from bin/fm-crew-state.sh <id> and preserves
 #     state, source, detail, and raw line separately.
@@ -33,6 +35,9 @@
 #     each home with explicit provenance, freshness, endpoint evidence, and unknown
 #     failure reasons. Parent status and bounded terminal evidence are historical,
 #     untrusted supplements only and never override a valid structured summary.
+#     Each structured-home record carries active_children, decisions_open, holds,
+#     queued, landed, endpoints, counts, and omitted; captain holds appear in
+#     decisions_open and are also preserved in queued with hold metadata.
 #   secondmate_landed: {records[],truncated[],unreadable[]} - the compatibility
 #     landed-work roll-up derived from secondmate_current.
 #   secondmate_guidance: return-channel action note for renderers and bearings.
@@ -130,6 +135,8 @@ JSON is the stable machine-readable output contract.
 --secondmate-home-summary emits the bounded structured summary used after a
 validated registered-home handoff. It is local-only, skips nested secondmate
 aggregation, and marks missing or unstructured current backlog state invalid.
+Active tasks-axi captain holds appear as decisions_open and stay visible in
+queued with hold_reason and hold_kind for downstream projections.
 Cross-home reads use FM_SNAPSHOT_SECONDMATES (default 20, 0 lifts the count
 bound), FM_SNAPSHOT_SECONDMATE_TIMEOUT, and FM_SNAPSHOT_SECONDMATE_MAX_BYTES.
 Terminal contradiction evidence uses
@@ -548,7 +555,11 @@ secondmate_home_summary_json() {  # <backlog-json> <tasks-json>
        | select((.state == "in_flight" or .state == "queued") and (.structured | not)) ]) as $unstructured_current
     | ([ $backlog.records[]? | select(.state == "in_flight" and .structured) ]) as $owned_in_flight
     | ([ $backlog.records[]? | select(.state == "queued" and .structured) ]) as $queued_all
-    | ([ $backlog.records[]? | select(.state == "done" and .structured)
+    | ([ $queued_all[]
+         | select(.kind == "captain" and .hold_kind == "captain" and .hold_reason != null)
+         | {id,key:.id,verb:"captain-hold",summary:(.title | trunc(160)),
+            reason:(.hold_reason | trunc(160)),source:"backlog"} ]) as $captain_holds_all
+    | ([ $backlog.records[]? | select(.state == "done" and .structured and .kind != "captain")
          | {id:(.id | trunc(120)),title:(.title | trunc(120)),
             pr_url:((.pr_url // null) | if . == null then null else trunc(500) end),
             report_path:((.report_path // null) | if . == null then null else trunc(500) end),
@@ -572,8 +583,9 @@ secondmate_home_summary_json() {  # <backlog-json> <tasks-json>
          | select(.id == $work.id and .current_state.state == "working")
          | {id,kind,state:.current_state.state,source:.current_state.source,
             doing:((.current_state.detail // "") | trunc(120))} ]) as $active_all
-    | ([ $tasks[] as $t | ($t.hints.open_decisions // [])[]
-         | {id:$t.id,key,verb,summary:(.summary | trunc(160))} ]) as $decisions_all
+    | ($captain_holds_all
+       + ([ $tasks[] as $t | ($t.hints.open_decisions // [])[]
+            | {id:$t.id,key,verb,summary:(.summary | trunc(160)),reason:null,source:"status"} ])) as $decisions_all
     | ([ $queued_all[] | select(.blocked_by != null)
          | {id:(.id | trunc(120)),title:(.title | trunc(90)),blocked_by:(.blocked_by | trunc(120)),reason:((.blocked_reason // "blocked") | trunc(120)),source:"backlog"} ]
        + [ $owned_in_flight[] as $work
@@ -599,7 +611,7 @@ secondmate_home_summary_json() {  # <backlog-json> <tasks-json>
          ($terminal_in_flight | map(.id + "=" + .state) | join(", "))
        else null end) as $reason
     | (if $valid | not then "unknown"
-       elif any($decisions_all[]; .verb == "needs-decision") then "captain_decision"
+       elif any($decisions_all[]; .verb == "needs-decision" or .verb == "captain-hold") then "captain_decision"
        elif ($active_all | length) > 0 then "active_child_work"
        elif ($holds_all | length) > 0 then "externally_held"
        else "no_active_work" end) as $state
