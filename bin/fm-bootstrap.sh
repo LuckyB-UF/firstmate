@@ -48,10 +48,11 @@
 #          no-mistakes is also MISSING when its installed version is older than
 #          1.31.2.
 #          tasks-axi and quota-axi are required bootstrap tools (same class as
-#          lavish-axi). tasks-axi is also version and feature gated (0.1.1+
-#          with update --archive-body and mv [<id>...]); an installed but
-#          incompatible build reports MISSING like no-mistakes. A compatible
-#          tasks-axi default backend is silent. quota-axi is required because
+#          lavish-axi). tasks-axi is also version and feature gated (semver 0.1.1+
+#          with update --archive-body and mv [<id>...], the latter putting the
+#          effective floor at 0.2.2+; docs/configuration.md owns the definition);
+#          an installed but incompatible build reports MISSING like no-mistakes. A
+#          compatible tasks-axi default backend is silent. quota-axi is required because
 #          crew-dispatch quota-balanced may call it; fm-dispatch-select.sh still
 #          degrades at runtime when quota data is unavailable.
 #          X mode is OPTIONAL and inert unless FM_HOME/.env has a non-empty

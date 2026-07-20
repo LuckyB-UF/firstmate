@@ -1010,6 +1010,33 @@ test_scripts_reject_fm_target_label_mismatch() {
   pass "fm-send: fm-id zellij targets reject pane ids whose tab label no longer matches"
 }
 
+test_spawn_refuses_zellij_secondmate_before_home_mutation() {
+  local home subhome data state config id out status
+  id="zelsmz1"
+  home="$TMP_ROOT/secondmate-refusal-home"
+  subhome="$TMP_ROOT/secondmate-refusal-subhome"
+  data="$home/data"
+  state="$home/state"
+  config="$home/config"
+  mkdir -p "$data" "$state" "$config" "$subhome/bin" "$subhome/data" "$subhome/state" "$subhome/projects"
+  printf '%s\n' "$id" > "$subhome/.fm-secondmate-home"
+  printf 'firstmate\n' > "$subhome/AGENTS.md"
+  printf 'claude\n' > "$config/crew-harness"
+  touch "$state/.last-watcher-beat"
+  set +e
+  out=$( FM_ROOT_OVERRIDE="$ROOT" FM_HOME="$home" FM_STATE_OVERRIDE="$state" FM_DATA_OVERRIDE="$data" FM_CONFIG_OVERRIDE="$config" \
+    FM_PROJECTS_OVERRIDE="$home/projects" FM_SPAWN_NO_GUARD=1 \
+    "$ROOT/bin/fm-spawn.sh" "$id" "$subhome" claude --backend zellij --secondmate 2>&1 )
+  status=$?
+  set +e
+  [ "$status" -ne 0 ] || fail "backend=zellij --secondmate should be refused"
+  assert_contains "$out" "backend=zellij does not support --secondmate spawns yet" \
+    "zellij secondmate refusal should happen at backend selection"
+  assert_absent "$subhome/config/crew-harness" \
+    "zellij secondmate refusal should not propagate inheritable config into the secondmate home"
+  pass "fm-spawn.sh --backend zellij --secondmate: refuses before secondmate-home mutation"
+}
+
 # shellcheck source=bin/fm-backend.sh
 . "$ROOT/bin/fm-backend.sh"
 
@@ -1064,3 +1091,4 @@ test_send_text_submit_send_failed_when_pane_absent
 test_scripts_route_explicit_target_through_meta_backend
 test_scripts_verify_label_for_fm_targets
 test_scripts_reject_fm_target_label_mismatch
+test_spawn_refuses_zellij_secondmate_before_home_mutation

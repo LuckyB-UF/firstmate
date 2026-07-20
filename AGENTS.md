@@ -237,6 +237,10 @@ Write the task-specific brief under section 11 before spawning.
 
 ### Dispatch and supervision handoff
 
+For a non-trivial feature whose shape is still fuzzy, an optional sharpening path runs before dispatch: load the `grill` skill when the captain invokes `/grill`, or offer it when a request is too vague to write acceptance criteria against.
+It interviews the captain into a short spec at `data/spec-<project>-<slug>.md`, which then feeds the ordinary brief below.
+Skip it for a sharp request, a bug, or a scout question; dispatching directly stays the default.
+
 Spawn only through `bin/fm-spawn.sh` after the profile and backend checks in section 4.
 The spawn must resolve a genuine isolated task worktree distinct from the primary checkout; a failed isolation assertion stops the task.
 After spawning, confirm the worker is processing the brief, handle any trust dialog through `harness-adapters`, and record ship or scout work as under way.
@@ -293,7 +297,7 @@ For any custom `state/<id>.check.sh` you write yourself, keep it an ordinary sin
 Tear down a ship task only after landing is confirmed.
 A teardown refusal for uncommitted or unlanded work is a stop-and-investigate result, never an obstacle to bypass.
 Never force teardown without explicit discard authority.
-After successful teardown, record completion, retain only the configured recent Done history, and re-evaluate queued work whose blockers and time gates have cleared.
+After successful teardown, record completion, retain only the configured recent Done history, and re-evaluate queued work that is not held and whose blockers and time gates have cleared.
 
 A secondmate is persistent and an empty queue is healthy.
 Retire one only on an explicit captain or main-firstmate decision, after loading `secondmate-provisioning`; its home must contain no work under way, and forced discard still requires explicit captain authority.
@@ -412,7 +416,8 @@ Work routed to a secondmate is recorded in that secondmate home's own backlog, n
 When a main-side thread such as a pending captain decision or relay reminder is worth durable tracking, file it as its own work item; use `tasks-axi hold <id> --reason "<reason>" --kind captain` for a captain-gated thread.
 Unresolved decisions discovered by investigations or visual reviews follow `decision-hold-lifecycle`, which owns their mandatory backlog lifecycle.
 Update the backlog on every dispatch, completion, and decision for a work item.
-Re-evaluate queued work after every teardown and heartbeat, dispatching items only when dependencies and time gates have cleared.
+Re-evaluate queued work after every teardown and heartbeat, dispatching items only when they are not held and dependencies and time gates have cleared.
+A held item is never dispatchable until its hold is cleared, whoever set it and for whatever reason.
 
 `.tasks.toml`, `docs/configuration.md`, and current `tasks-axi --help` own the backlog schema, compatibility, retention, and routine command syntax.
 Use compatible `tasks-axi` when the configured backend selects it and the documented manual path otherwise; keep only the configured recent Done entries.
@@ -440,10 +445,12 @@ The scaffold is a safety contract, not a suggestion.
 
 ## 12. Self-update
 
-Firstmate's shared instruction surface reaches running homes only after it lands on the default branch and those homes fast-forward.
-Only `AGENTS.md`, `bin/`, and `.agents/skills/` are loaded by a running firstmate; public `skills/` is an installer-facing surface.
+This fleet runs a fork: `origin` is the shared upstream, and `fork/main` carries upstream plus this fleet's private adaptations.
+Every home runs `fork/main`, so an improvement reaches a running home only after it is on `fork/main` and that home fast-forwards to it; upstream enters only by being merged into `fork/main`.
+Never advance a home from origin, which would strip the fleet's adaptations.
+Only `AGENTS.md`, `bin/`, and `.agents/skills/` are a running firstmate instruction surface; public `skills/` is tracked for installers and is not loaded by firstmate.
 When the captain invokes `/updatefirstmate` or asks to update firstmate, load the `/updatefirstmate` skill.
-It performs guarded fast-forward updates of firstmate and registered secondmate homes, refreshes instructions, and never touches anything under `projects/`.
+It merges upstream into `fork/main`, performs only fast-forward self-updates of firstmate and registered secondmate homes from `fork/main`, re-reads `AGENTS.md` when needed, nudges updated live secondmates, and never touches anything under `projects/`.
 
 ## 13. Agent-only reference skills
 

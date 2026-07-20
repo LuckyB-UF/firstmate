@@ -123,6 +123,55 @@ test_no_profile_keeps_claude_launch_unchanged() {
   pass "no --model/--effort records defaults and keeps the claude launch byte-identical"
 }
 
+# The claude launch carries CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false per KIND:
+# ship/scout crewmates are autonomous workers whose composer the captain never
+# drives, so the predicted-next-prompt ghost text is disabled; a secondmate is
+# captain-facing and launches with the native suggestion ENABLED, relying on the
+# shared fm_composer_strip_ghost extractor (pinned by tests/fm-composer-ghost.test.sh)
+# to keep that dim ghost out of pending-input classification.
+test_claude_prompt_suggestion_split_by_kind() {
+  local rec id sm status launch prefix expected
+  prefix='CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false '
+
+  # scout: keeps the disable prefix.
+  id=suggestion-scout-z17
+  rec=$(make_spawn_case suggestion-scout claude "$id")
+  read_case_record "$rec"
+  run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --scout >/dev/null
+  status=$?
+  expect_code 0 "$status" "claude scout spawn should succeed"
+  assert_grep "kind=scout" "$HOME_DIR/state/$id.meta" "scout meta missing kind=scout"
+  launch=$(cat "$LAUNCH_LOG")
+  case "$launch" in
+    "$prefix"*) ;;
+    *) fail "claude scout launch lost the prompt-suggestion disable prefix: $launch" ;;
+  esac
+
+  # secondmate: omits the disable prefix (native suggestions on).
+  id=suggestion-secondmate-z18
+  rec=$(make_spawn_case suggestion-secondmate claude "$id")
+  read_case_record "$rec"
+  sm="$CASE_DIR/secondmate-home"
+  make_seeded_secondmate_home "$sm" "$id"
+  run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate >/dev/null
+  status=$?
+  expect_code 0 "$status" "claude secondmate spawn should succeed"
+  assert_grep "kind=secondmate" "$HOME_DIR/state/$id.meta" "secondmate meta missing kind=secondmate"
+  launch=$(cat "$LAUNCH_LOG")
+  case "$launch" in
+    *CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION*) fail "claude secondmate launch must not disable native prompt suggestions: $launch" ;;
+  esac
+  # The secondmate launch legitimately carries the home-isolation env prefix
+  # (owned by the FM_HOME propagation tests); pin only that the claude command
+  # itself is intact and unprefixed by the suggestion disable.
+  expected="claude --dangerously-skip-permissions \"\$(cat '$sm/data/charter.md')\""
+  case "$launch" in
+    *"$expected") ;;
+    *) fail "claude secondmate launch changed"$'\n'"expected suffix: $expected"$'\n'"actual:          $launch" ;;
+  esac
+  pass "claude disables prompt suggestions for ship/scout and enables them for a secondmate"
+}
+
 test_active_dispatch_profile_requires_explicit_harness_for_ship() {
   local rec id out status
   id=profile-required-ship-z11
@@ -385,6 +434,7 @@ test_active_dispatch_profile_does_not_block_secondmate_launch() {
 }
 
 test_no_profile_keeps_claude_launch_unchanged
+test_claude_prompt_suggestion_split_by_kind
 test_active_dispatch_profile_requires_explicit_harness_for_ship
 test_active_dispatch_profile_requires_explicit_harness_for_scout
 test_active_dispatch_profile_allows_explicit_harness

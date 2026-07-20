@@ -5,15 +5,18 @@
 # This is the one implementation of "advance a firstmate checkout to a base by a
 # clean fast-forward, never forcing, merging, or stashing" used by every sync
 # path:
-#   - /updatefirstmate (bin/fm-update.sh) pulls from origin: base_mode "origin".
+#   - /updatefirstmate (bin/fm-update.sh) advances every home to the fork:
+#     base_mode "fork". This fleet runs a fork, so upstream reaches a home only
+#     after bin/fm-update.sh has merged origin into fork/<default>; a home never
+#     advances from origin directly, which would strip the fleet's adaptations.
 #   - the local-HEAD secondmate sync (bin/fm-spawn.sh on launch, bin/fm-bootstrap.sh
 #     on startup) follows the PRIMARY checkout's current default-branch commit:
-#     base_mode is that local commit, with NO fetch and no origin dependency.
+#     base_mode is that local commit, with NO fetch and no remote dependency.
 #
 # A linked-worktree secondmate home already holds the primary's commit in the
 # shared object store, so its local-HEAD sync is a purely local fast-forward that
 # never touches the network. A standalone clone moves through that path only when
-# it already has the target; otherwise it is skipped until the origin path updates it.
+# it already has the target; otherwise it is skipped until the fork path updates it.
 # A tracked-files fast-forward never touches the gitignored operational dirs
 # (data/, state/, config/, projects/, .no-mistakes/), so it cannot disturb a
 # secondmate's backlog, projects, or in-flight work.
@@ -189,19 +192,20 @@ validate_secondmate_home() {
 }
 
 # A single fetch refreshes every worktree that shares an object store, so fetch
-# each distinct git-common-dir at most once. Used ONLY by the origin base mode;
-# the local-HEAD sync never fetches.
+# each distinct git-common-dir at most once per remote. Used ONLY by the remote
+# base modes (origin, fork); the local-HEAD sync never fetches.
 FETCHED=""
 fetch_once() {
-  local dir=$1 common
+  local dir=$1 remote=${2:-origin} common key
   common=$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+  key="$common|$remote"
   if [ -n "$common" ]; then
     case " $FETCHED " in
-      *" $common "*) return 0 ;;
+      *" $key "*) return 0 ;;
     esac
   fi
-  if git -C "$dir" fetch origin --prune --quiet 2>/dev/null; then
-    [ -n "$common" ] && FETCHED="$FETCHED $common"
+  if git -C "$dir" fetch "$remote" --prune --quiet 2>/dev/null; then
+    [ -n "$common" ] && FETCHED="$FETCHED $key"
     return 0
   fi
   return 1
@@ -271,9 +275,17 @@ live_secondmate_meta_records() {
 #   FF_INSTR  = comma list of changed instruction paths (only when updated)
 #
 # base_mode selects where the fast-forward base comes from:
-#   origin       - fetch origin and advance to origin/<default> (the /updatefirstmate
-#                  path); requires an origin remote and network reachability.
-#   <commit-ish> - advance to that LOCAL commit with NO fetch and no origin
+#   fork         - fetch the fork remote and advance to fork/<default> (the
+#                  /updatefirstmate path); requires a fork remote and network
+#                  reachability. fork/<default> carries upstream PLUS this fleet's
+#                  private adaptations, so it is the only base a home may advance
+#                  to; advancing a home from origin would strip those adaptations.
+#                  A target without a fork remote is skipped, never advanced from
+#                  origin as a fallback.
+#   origin       - fetch origin and advance to origin/<default>; requires an origin
+#                  remote and network reachability. This is upstream ingest only -
+#                  never a home advance (see fork above).
+#   <commit-ish> - advance to that LOCAL commit with NO fetch and no remote
 #                  dependency (the local-HEAD secondmate sync). The commit must
 #                  already exist in the target's object store, which it always does
 #                  for a worktree of this same repo; a standalone clone that lacks
@@ -302,20 +314,24 @@ ff_target() {
     return 0
   }
 
-  # Resolve the fast-forward base from base_mode (see header).
-  if [ "$base_mode" = origin ]; then
-    if ! git -C "$dir" remote get-url origin >/dev/null 2>&1; then
-      echo "$label: skipped: no origin remote"
-      return 0
-    fi
-    if ! fetch_once "$dir"; then
-      echo "$label: skipped: fetch failed"
-      return 0
-    fi
-    base="origin/$default"
-  else
-    base="$base_mode"
-  fi
+  # Resolve the fast-forward base from base_mode (see header). The remote modes
+  # are named after the remote they track, so the mode doubles as the remote name.
+  case "$base_mode" in
+    origin | fork)
+      if ! git -C "$dir" remote get-url "$base_mode" >/dev/null 2>&1; then
+        echo "$label: skipped: no $base_mode remote"
+        return 0
+      fi
+      if ! fetch_once "$dir" "$base_mode"; then
+        echo "$label: skipped: fetch failed"
+        return 0
+      fi
+      base="$base_mode/$default"
+      ;;
+    *)
+      base="$base_mode"
+      ;;
+  esac
 
   if ! git -C "$dir" rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
     echo "$label: skipped: $base does not exist"

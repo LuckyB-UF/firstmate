@@ -138,12 +138,16 @@ If such a dialog is showing, accept it from an active firstmate session using `F
 
 Claude renders a predicted-next-prompt suggestion as dim/faint text inside an otherwise-empty composer after a turn completes.
 A plain `tmux capture-pane` cannot tell that ghost text apart from typed text.
-Firstmate launches every claude crewmate and secondmate with `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false`, scoped to firstmate-launched agents through `bin/fm-spawn.sh`, so it never touches the captain's global config.
+Firstmate applies `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` per kind through `bin/fm-spawn.sh`, scoped to firstmate-launched agents, so it never touches the captain's global config.
+A claude crewmate (ship or scout) launches with the suggestion disabled: it is an autonomous worker the captain never drives from its composer, so the ghost text has no reader to help.
+A claude secondmate launches with the native suggestion enabled, because the captain reads and drives that window and should see it exactly as in their own session.
 The CLI's `--prompt-suggestions` flag is print/SDK-mode only and does not suppress the interactive composer ghost text, verified empirically on v2.1.186.
-As defense in depth for any pane that flag cannot reach, including the captain's own firstmate composer that away-mode reads, the shared `fm_composer_strip_ghost` extractor in `bin/fm-composer-lib.sh` removes dim/faint SGR 2 ghost runs before pending-input classification on both ANSI-capable readers (tmux and herdr).
-Its broader dark-TRUECOLOR placeholder handling and dark-theme tradeoff are documented in `docs/herdr-backend.md`'s 2026-07-10 incident record.
+Every pane the flag does not disable - a secondmate, and the captain's own firstmate composer that away-mode reads - relies on the shared `fm_composer_strip_ghost` extractor in `bin/fm-composer-lib.sh`, which removes dim/faint SGR 2 ghost runs before pending-input classification on both ANSI-capable readers (tmux and herdr).
+The plain-screen backends that cannot strip ghost styling - orca, cmux, and zellij - all refuse `--secondmate` spawns in `bin/fm-spawn.sh`, so no secondmate can land on a reader without `fm_composer_strip_ghost`.
+That extractor's broader dark-TRUECOLOR placeholder handling and dark-theme tradeoff are documented in `docs/herdr-backend.md`'s 2026-07-10 incident record.
 That styled capture is internal to the boolean detector only.
 `fm-peek` and every other human or LLM-facing capture path stays plain `tmux capture-pane` with no escape codes.
+Note for a future reader: because those paths are plain, a peek of an IDLE secondmate can render its predicted next prompt as apparent typed input, bounded by AGENTS.md forbidding reads of a secondmate's chat and by the documented post-spawn trust-dialog peek above happening while the agent is still processing its charter, before any ghost renders.
 
 **Primary-session guard fact (verified 2026-07-04, Claude Code 2.1.201; preserved 2026-07-08, Claude Code 2.1.204).**
 This is separate from the per-task crewmate turn-end hook above (that one just `touch`es a marker file in a task's own `.claude/settings.local.json`).
