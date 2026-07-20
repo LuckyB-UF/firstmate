@@ -1,7 +1,32 @@
 #!/usr/bin/env bash
 # Bind an intentional custom watcher check to its current bytes.
+#
+# Authoring contract for a custom state/<id>.check.sh:
+#   - Make it an ordinary (non-symlink) file, mode 0700.
+#   - Print exactly one line only when firstmate should wake; print nothing otherwise.
+#   - Finish before FM_CHECK_TIMEOUT.
+#   - Bind its current bytes with this script before the watcher may execute it,
+#     and re-bind after any edit to the check.
+#
 # Usage: fm-check-register.sh <id>
+#        fm-check-register.sh --help
 set -u
+
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  cat <<'EOF'
+Usage: fm-check-register.sh <id>
+
+Bind an intentional custom watcher check (state/<id>.check.sh) to its current
+bytes so the watcher may execute it. Re-run after any edit to the check.
+
+Authoring contract for a custom state/<id>.check.sh:
+  - Make it an ordinary (non-symlink) file, mode 0700.
+  - Print exactly one line only when firstmate should wake; print nothing otherwise.
+  - Finish before FM_CHECK_TIMEOUT.
+  - The watcher will not run the check until its bytes are bound by this script.
+EOF
+  exit 0
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
