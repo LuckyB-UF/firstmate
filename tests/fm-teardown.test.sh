@@ -1345,9 +1345,53 @@ test_reused_slot_in_use_with_dead_endpoint_refuses() {
 
   expect_code 1 "$rc" "reused-slot-inuse: teardown must refuse a live-owned re-handed slot"
   assert_grep "REFUSED" "$case_dir/stderr" "reused-slot-inuse: expected a REFUSED line"
-  assert_grep "active use" "$case_dir/stderr" "reused-slot-inuse: refusal should cite the live foreign owner"
+  assert_grep "another process" "$case_dir/stderr" "reused-slot-inuse: refusal should cite the live foreign owner"
   assert_absent "$case_dir/return-attempted" "reused-slot-inuse: teardown must NOT kill the live owner"
   pass "teardown refuses when the recorded slot is live-owned by another task and this task's session is gone"
+}
+
+# An UNRECOGNIZED non-free state word (neither lease, available, nor self) with
+# this task's endpoint gone must fail CLOSED: the guard refuses rather than
+# proceeding on a state it does not know, locking in fail-closed-on-unknown.
+test_reused_slot_unknown_state_with_dead_endpoint_refuses() {
+  local case_dir rc
+  case_dir=$(make_case reused-slot-unknown)
+  write_meta "$case_dir" no-mistakes ship
+  wt_commit "$case_dir" "work"
+  add_slot_status_treehouse "$case_dir" reserved ""
+  add_tmux_missing_pane "$case_dir"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "reused-slot-unknown: unknown non-free state must fail closed"
+  assert_grep "REFUSED" "$case_dir/stderr" "reused-slot-unknown: expected a REFUSED line"
+  assert_grep "reserved" "$case_dir/stderr" "reused-slot-unknown: refusal should name the unrecognized state"
+  assert_absent "$case_dir/return-attempted" "reused-slot-unknown: teardown must NOT return an unknown-state slot"
+  pass "teardown refuses an unrecognized non-free state when this task's session is gone"
+}
+
+# The common post-outage recovery case: treehouse marks a dead interactive
+# owner's slot 'available'. Even with this task's endpoint gone, teardown must
+# PROCEED - the slot is free, so returning it is safe and must not be refused.
+test_available_slot_with_dead_endpoint_proceeds() {
+  local case_dir rc
+  case_dir=$(make_case available-slot)
+  write_meta "$case_dir" no-mistakes ship
+  add_slot_status_treehouse "$case_dir" available ""
+  add_tmux_missing_pane "$case_dir"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 0 "$rc" "available-slot: teardown should proceed when the slot is free"
+  ! grep -q REFUSED "$case_dir/stderr" || fail "available-slot: teardown wrongly refused a free slot"
+  assert_present "$case_dir/return-attempted" "available-slot: teardown should return a free slot"
+  pass "teardown proceeds when the recorded slot is free even though this task's session is gone"
 }
 
 test_force_does_not_bypass_reused_slot_guard() {
@@ -1391,6 +1435,8 @@ test_owned_slot_teardown_proceeds() {
 test_local_only_fork_remote_allows
 test_reused_slot_leased_to_other_task_refuses
 test_reused_slot_in_use_with_dead_endpoint_refuses
+test_reused_slot_unknown_state_with_dead_endpoint_refuses
+test_available_slot_with_dead_endpoint_proceeds
 test_force_does_not_bypass_reused_slot_guard
 test_owned_slot_teardown_proceeds
 test_teardown_prompts_tasks_axi_done_when_compatible

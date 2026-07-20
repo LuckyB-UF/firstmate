@@ -36,10 +36,13 @@
 # quarantine entries with the rest of the volatile state.
 # Before acting on the recorded worktree= at all, teardown verifies (via
 # treehouse's own `status`) that the recorded interactive treehouse slot has not
-# been re-handed to a DIFFERENT task after an outage; a stale pointer whose slot
-# is now leased to, or in active use by, another task is refused loudly rather
-# than killed. This guard is layered before the destructive actions and is not
-# bypassed by --force; see assert_treehouse_worktree_owner for the full contract.
+# been re-handed to a DIFFERENT task after an outage. Recognition is anchored on
+# treehouse's known-free states, so only 'available', the self "you're here"
+# slot, and a lease held by this task pass; a slot now leased to, in use by, or
+# in any unrecognized non-free state while this task's own session is gone is
+# refused loudly rather than killed. This guard is layered before the destructive
+# actions and is not bypassed by --force; see assert_treehouse_worktree_owner for
+# the full contract.
 # Orca tasks use the same safety checks, then close the recorded terminal and
 # remove the recorded worktree through `orca worktree rm`; teardown never guesses
 # an Orca target from ambient CLI state.
@@ -496,13 +499,19 @@ canonical_existing_dir() {
 #
 # Before any destructive action, confirm treehouse still considers the recorded
 # worktree owned by THIS task (or unowned), using treehouse's own `status`.
-# Refuse loudly on positive evidence that the slot was re-handed:
-#   - the slot is now LEASED to any holder. A crewmate/scout worktree is acquired
+# Recognition is anchored on the KNOWN-FREE states, so an unknown/future non-free
+# word fails CLOSED rather than proceeding. For the matched slot row:
+#   - LEASED to any holder -> REFUSE. A crewmate/scout worktree is acquired
 #     interactively and is never leased, so a lease on its recorded path proves a
 #     different, durable owner took the slot.
-#   - the slot is now IN-USE by a live process while THIS task's own backend
-#     endpoint is gone. Treehouse only re-hands a slot whose previous owner died,
-#     so a live owner combined with a dead endpoint of ours cannot be us.
+#   - 'available' or the self-occupied "you're here" state -> proceed. Treehouse
+#     marks a slot 'available' when its interactive owner dies, which is exactly
+#     the common post-outage "dead task, slot not reused" recovery case.
+#   - ANY OTHER state (in-use, busy, or any unrecognized/future non-free word) ->
+#     treat as possibly-owned: proceed only if THIS task's own backend endpoint
+#     is still alive (the live owner is us; treehouse never re-hands a live-owned
+#     slot); otherwise REFUSE, since a live/held slot with a dead endpoint of
+#     ours cannot be us.
 #
 # Scope: interactive treehouse worktrees only. Orca worktrees (backend=orca) are
 # handled by their own path-match guard. Secondmate homes are leased durably
@@ -518,7 +527,7 @@ canonical_existing_dir() {
 # --force. Reclaiming a slot from a stranger is a treehouse-level operation, not
 # a task teardown.
 assert_treehouse_worktree_owner() {
-  local wt=$1 wt_canon status rows sstate spath sholder cand_canon tilde='~'
+  local wt=$1 wt_canon status rows sstate sstate_lc spath sholder cand_canon tilde='~'
   [ "$BACKEND" = orca ] && return 0
   [ "$KIND" = secondmate ] && return 0
   [ -n "$wt" ] && [ -d "$wt" ] || return 0
@@ -551,22 +560,23 @@ assert_treehouse_worktree_owner() {
     case "$spath" in "$tilde"|"$tilde"/*) spath="$HOME${spath#"$tilde"}" ;; esac
     cand_canon=$(canonical_existing_dir "$spath" 2>/dev/null || printf '%s' "$spath")
     [ "$cand_canon" = "$wt_canon" ] || continue
-    case "$sstate" in
+    sstate_lc=$(printf '%s' "$sstate" | tr '[:upper:]' '[:lower:]')
+    case "$sstate_lc" in
       *lease*)
         echo "REFUSED: teardown of task $ID targets worktree $wt, but treehouse now reports that pool slot leased to '${sholder:-unknown}', not this task." >&2
         echo "The recorded worktree pointer is stale - its slot was re-handed after an outage. Returning it would destroy another task's work. Preserving task state." >&2
         return 1
         ;;
-      *in-use*|*in_use*|*inuse*|*busy*)
+      available|*here*)
+        return 0
+        ;;
+      *)
         if fm_backend_target_exists "$BACKEND" "$T" "fm-$ID"; then
           return 0
         fi
-        echo "REFUSED: teardown of task $ID targets worktree $wt, but treehouse reports that pool slot in active use by another process while this task's own session is gone." >&2
+        echo "REFUSED: teardown of task $ID targets worktree $wt, but treehouse reports that pool slot held by another process (state '$sstate') while this task's own session is gone." >&2
         echo "The recorded worktree pointer is stale - its slot was re-handed after an outage. Returning it would kill the live owner. Preserving task state." >&2
         return 1
-        ;;
-      *)
-        return 0
         ;;
     esac
   done <<EOF
