@@ -239,7 +239,8 @@ Write the task-specific brief under section 11 before spawning.
 
 For a non-trivial feature whose shape is still fuzzy, an optional sharpening path runs before dispatch: load the `grill` skill when the captain invokes `/grill`, or offer it when a request is too vague to write acceptance criteria against.
 It interviews the captain into a short spec at `data/spec-<project>-<slug>.md`, which then feeds the ordinary brief below.
-Skip it for a sharp request, a bug, or a scout question; dispatching directly stays the default.
+When a sharpened spec is too large to brief as one crewmate task, load the `decompose` skill (captain-invoked as `/decompose`, or run it yourself here) to break the spec into dependency-ordered vertical-slice backlog items with `blocked-by` edges before dispatch.
+Skip both for a sharp request, a bug, or a scout question; dispatching directly stays the default.
 
 Spawn only through `bin/fm-spawn.sh` after the profile and backend checks in section 4.
 The spawn must resolve a genuine isolated task worktree distinct from the primary checkout; a failed isolation assertion stops the task.
