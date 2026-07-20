@@ -397,6 +397,43 @@ SH
   chmod +x "$case_dir/fakebin/treehouse"
 }
 
+# Reboot-hazard mocks (fm-worktree-meta-stale-release): `treehouse status`
+# reports the task's recorded worktree slot in a chosen state/holder, simulating
+# a pool slot that was freed on outage and re-handed to another task. `return`
+# records that it was attempted (touching return-attempted) so a test can prove
+# the guard blocked the destructive return. Args: case_dir state holder
+add_slot_status_treehouse() {
+  local case_dir=$1 state=$2 holder=$3 held=""
+  [ -z "$holder" ] || held="  (held by $holder)"
+  cat > "$case_dir/fakebin/treehouse" <<SH
+#!/usr/bin/env bash
+if [ "\${1:-}" = status ]; then
+  printf '%s\n' "1     $state       $case_dir/wt$held"
+  exit 0
+fi
+if [ "\${1:-}" = return ]; then
+  : > "$case_dir/return-attempted"
+  exit 0
+fi
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/treehouse"
+}
+
+# The task's tmux pane is gone (as after a full outage): existence probes fail,
+# every other tmux call still succeeds so unrelated kill/clear steps stay quiet.
+add_tmux_missing_pane() {
+  local case_dir=$1
+  cat > "$case_dir/fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+case "${1:-}" in
+  display-message) exit 1 ;;
+esac
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/tmux"
+}
+
 git_index_lock_path() {
   local dir=$1 lock abs_dir
   lock=$(git -C "$dir" rev-parse --git-path index.lock)
@@ -1263,7 +1300,99 @@ SH
   pass "herdr teardown removes pane-owned escalation dedupe state"
 }
 
+# --- reboot-hazard guard: recorded worktree slot re-handed to another task ----
+#
+# After an outage, treehouse frees a dead task's interactive pool slot and
+# re-hands it to a NEW task, but the dead task's meta still records that slot.
+# Tearing the dead task down would kill/return the live new owner's worktree.
+# The guard reads treehouse's own status and refuses on positive foreign-owner
+# evidence, layered before every destructive action and not bypassed by --force.
+
+test_reused_slot_leased_to_other_task_refuses() {
+  local case_dir rc
+  case_dir=$(make_case reused-slot-leased)
+  write_meta "$case_dir" no-mistakes ship
+  # Unlanded work would normally make teardown refuse for a different reason; the
+  # owner guard must fire FIRST, naming the foreign lease holder.
+  wt_commit "$case_dir" "work"
+  add_slot_status_treehouse "$case_dir" leased task-other
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "reused-slot-leased: teardown must refuse a re-handed slot"
+  assert_grep "REFUSED" "$case_dir/stderr" "reused-slot-leased: expected a REFUSED line"
+  assert_grep "task-other" "$case_dir/stderr" "reused-slot-leased: refusal should name the current lease owner"
+  assert_grep "task-x1" "$case_dir/stderr" "reused-slot-leased: refusal should name this task id"
+  assert_absent "$case_dir/return-attempted" "reused-slot-leased: teardown must NOT return the new owner's worktree"
+  pass "teardown refuses when the recorded slot was re-leased to a different task"
+}
+
+test_reused_slot_in_use_with_dead_endpoint_refuses() {
+  local case_dir rc
+  case_dir=$(make_case reused-slot-inuse)
+  write_meta "$case_dir" no-mistakes ship
+  wt_commit "$case_dir" "work"
+  add_slot_status_treehouse "$case_dir" in-use ""
+  add_tmux_missing_pane "$case_dir"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "reused-slot-inuse: teardown must refuse a live-owned re-handed slot"
+  assert_grep "REFUSED" "$case_dir/stderr" "reused-slot-inuse: expected a REFUSED line"
+  assert_grep "active use" "$case_dir/stderr" "reused-slot-inuse: refusal should cite the live foreign owner"
+  assert_absent "$case_dir/return-attempted" "reused-slot-inuse: teardown must NOT kill the live owner"
+  pass "teardown refuses when the recorded slot is live-owned by another task and this task's session is gone"
+}
+
+test_force_does_not_bypass_reused_slot_guard() {
+  local case_dir rc
+  case_dir=$(make_case reused-slot-force)
+  write_meta "$case_dir" no-mistakes ship
+  wt_commit "$case_dir" "work"
+  add_slot_status_treehouse "$case_dir" leased task-other
+
+  set +e
+  run_teardown "$case_dir" --force > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "reused-slot-force: --force must not license killing another task's worktree"
+  assert_grep "REFUSED" "$case_dir/stderr" "reused-slot-force: expected a REFUSED line even under --force"
+  assert_absent "$case_dir/return-attempted" "reused-slot-force: --force teardown must NOT return the new owner's worktree"
+  pass "--force does not bypass the re-handed-slot guard"
+}
+
+test_owned_slot_teardown_proceeds() {
+  local case_dir rc
+  case_dir=$(make_case owned-slot)
+  write_meta "$case_dir" no-mistakes ship
+  # No unpushed work (HEAD is the origin baseline), and the slot's live owner is
+  # this task's own pane (default tmux mock reports it present), so the guard
+  # passes and teardown returns the worktree exactly as before.
+  add_slot_status_treehouse "$case_dir" in-use ""
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 0 "$rc" "owned-slot: teardown should proceed when the slot is still ours"
+  ! grep -q REFUSED "$case_dir/stderr" || fail "owned-slot: teardown wrongly refused its own live slot"
+  assert_present "$case_dir/return-attempted" "owned-slot: teardown should return its own worktree"
+  pass "teardown proceeds as before when the recorded slot is still owned by this task"
+}
+
 test_local_only_fork_remote_allows
+test_reused_slot_leased_to_other_task_refuses
+test_reused_slot_in_use_with_dead_endpoint_refuses
+test_force_does_not_bypass_reused_slot_guard
+test_owned_slot_teardown_proceeds
 test_teardown_prompts_tasks_axi_done_when_compatible
 test_teardown_manual_backend_prompts_hand_edit_even_when_tasks_axi_present
 test_local_only_truly_unpushed_refuses
