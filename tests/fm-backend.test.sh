@@ -940,14 +940,22 @@ test_teardown_conformance_old_vs_new() {
 
   expect_code 0 "$rc_old" "old fm-teardown.sh (scout, report present) should succeed"$'\n'"$out_old"
   expect_code 0 "$rc_new" "new fm-teardown.sh (scout, report present) should succeed"$'\n'"$out_new"
-  diff -u "$log_old" "$log_new" > "$TMP_ROOT/teardown-diff.txt" 2>&1 \
-    || fail "fm-teardown.sh: tmux+treehouse command log differs old vs new"$'\n'"$(cat "$TMP_ROOT/teardown-diff.txt")"
+  # The new teardown reads `treehouse status` once, before any destructive
+  # action, as its re-handed-slot guard (assert_treehouse_worktree_owner). That
+  # leading status probe is the one intended new command; every destructive
+  # action after it must stay byte-identical to the pre-guard teardown, so the
+  # conformance diff filters exactly that probe line out of the new log.
+  assert_contains "$(cat "$log_new")" "treehouse"$'\x1f''status' \
+    "new teardown did not run the treehouse status re-handed-slot guard"
+  grep -vxF "$(printf 'treehouse\x1fstatus')" "$log_new" > "$TMP_ROOT/teardown-new-postguard.log"
+  diff -u "$log_old" "$TMP_ROOT/teardown-new-postguard.log" > "$TMP_ROOT/teardown-diff.txt" 2>&1 \
+    || fail "fm-teardown.sh: post-guard tmux+treehouse command log differs old vs new"$'\n'"$(cat "$TMP_ROOT/teardown-diff.txt")"
   assert_contains "$(cat "$log_new")" "treehouse"$'\x1f''return'$'\x1f''--force'$'\x1f'"$wt" \
     "teardown did not call treehouse return --force <worktree>"
   assert_contains "$(cat "$log_new")" "tmux"$'\x1f''kill-window'$'\x1f''-t'$'\x1f'"firstmate:fm-$id" \
     "teardown did not call tmux kill-window -t <window>"
 
-  pass "fm-teardown.sh: treehouse return + tmux kill-window command log is byte-identical old vs new for a scout task"
+  pass "fm-teardown.sh: aside from the new treehouse status guard probe, the treehouse return + tmux kill-window command log is byte-identical old vs new for a scout task"
 }
 
 # --- backend selection loudly refuses an unknown backend --------------------
