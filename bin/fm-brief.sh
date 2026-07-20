@@ -34,6 +34,9 @@
 #   local-only   implement on branch, stop and report "ready in branch" (no push/PR);
 #                captain approves, firstmate merges to local main
 # Ship briefs begin with a worktree-isolation assertion before the branch step.
+# Ship briefs also carry a test-discipline section (agree the test seam first,
+# named anti-patterns) so every ship task builds test-first; it is folded into
+# the scaffold rather than shipped as a standalone skill.
 # Scout tasks ignore mode - their deliverable is a report, not a merge.
 # Every scaffold's status protocol distinguishes the configured
 # declared-external-wait verb (FM_CLASSIFY_PAUSED_VERB, default "paused") from
@@ -326,6 +329,19 @@ EOF
     ;;
 esac
 
+TDD_SECTION=$(cat <<'EOF'
+# Test discipline
+Agree the test seam before you implement, not after.
+Decide up front what observable behavior each test asserts against - the public output, return value, or contract a caller sees - and let that seam, not the code you are about to write, define the test.
+If this task reproduces a bug, the reproduction is the regression test.
+Avoid these anti-patterns:
+- Testing internals instead of observable behavior: a test bound to private state or call order breaks on every refactor and proves nothing about correctness.
+- Writing the test to match code you already wrote: a test shaped to the current output passes by construction and catches nothing.
+- Over-mocking, especially mocking what you do not own: you end up testing the mock, not the system.
+- Assertion-free or snapshot-everything tests: they lock in whatever happens to run, not the behavior you meant to guarantee.
+EOF
+)
+
 cat > "$BRIEF" <<EOF
 You are a crewmate: an autonomous worker agent managed by firstmate. Work on your own; do not wait for a human.
 
@@ -365,6 +381,8 @@ $RULE1
 7. Never stop, restart, or update the shared \`no-mistakes\` daemon - it is one instance serving
    every lane/home, so restarting it kills other lanes' in-flight pipeline runs. On ANY no-mistakes
    daemon error, append \`blocked: {the daemon error}\` and stop; only firstmate manages the daemon.
+
+$TDD_SECTION
 
 # Project memory
 If \`AGENTS.md\` or \`CLAUDE.md\` already exists, or if this task produced durable project-intrinsic knowledge, run \`$FM_ROOT/bin/fm-ensure-agents-md.sh .\` in the worktree.
