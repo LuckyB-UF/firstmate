@@ -37,12 +37,12 @@
 # Before acting on the recorded worktree= at all, teardown verifies (via
 # treehouse's own `status`) that the recorded interactive treehouse slot has not
 # been re-handed to a DIFFERENT task after an outage. Recognition is anchored on
-# treehouse's known-free states, so only 'available', the self "you're here"
-# slot, and a lease held by this task pass; a slot now leased to, in use by, or
-# in any unrecognized non-free state while this task's own session is gone is
-# refused loudly rather than killed. This guard is layered before the destructive
-# actions and is not bypassed by --force; see assert_treehouse_worktree_owner for
-# the full contract.
+# treehouse's known-free states, so only 'available' and the self "you're here"
+# slot pass; a slot now leased to any holder is refused outright, and a slot in
+# use by, or in any unrecognized non-free state while this task's own session is
+# gone, is likewise refused loudly rather than killed. This guard is layered
+# before the destructive actions and is not bypassed by --force; see
+# assert_treehouse_worktree_owner for the full contract.
 # Orca tasks use the same safety checks, then close the recorded terminal and
 # remove the recorded worktree through `orca worktree rm`; teardown never guesses
 # an Orca target from ambient CLI state.
@@ -539,8 +539,10 @@ assert_treehouse_worktree_owner() {
   # `treehouse status` resolves the pool from the working directory; the task
   # worktree came from the project's pool, so query it from the project.
   status=$( cd "$PROJ" 2>/dev/null && treehouse status 2>/dev/null ) || return 0
-  # Extract "<state>\t<path>\t<holder>" rows; version banners and process lines
-  # (whose first field is not a slot number) are skipped.
+  # Verified `treehouse status` contract: slot rows are "<slot> <state> <path>
+  # [(held by <holder>)]" with columns slot/state/path and states available,
+  # leased, and in-use. Extract "<state>\t<path>\t<holder>" rows; version banners
+  # and process lines (whose first field is not a slot number) are skipped.
   rows=$(printf '%s\n' "$status" | awk '
     $1 ~ /^[0-9]+$/ {
       state=$2; path=$3; holder="";
