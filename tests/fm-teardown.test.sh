@@ -83,7 +83,12 @@ exit 0
 SH
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
-# tmux kill-window etc.: succeed silently.
+# tmux kill-window etc.: succeed silently. display-message reports a live agent
+# (claude) as the pane's foreground command, so the treehouse-owner guard's
+# confident agent-liveness probe reads this task's own pane as alive by default.
+case "${1:-}" in
+  display-message) echo claude ;;
+esac
 exit 0
 SH
   # Default gh-axi mock: no PR is associated with the branch, and viewing any PR
@@ -428,6 +433,21 @@ add_tmux_missing_pane() {
 #!/usr/bin/env bash
 case "${1:-}" in
   display-message) exit 1 ;;
+esac
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/tmux"
+}
+
+# The task's tmux pane still EXISTS but its agent process has exited, leaving a
+# bare idle shell. A pane-presence-only probe would wrongly read this as "alive";
+# the confident agent-liveness probe must read it as dead.
+add_tmux_bare_shell_pane() {
+  local case_dir=$1
+  cat > "$case_dir/fakebin/tmux" <<'SH'
+#!/usr/bin/env bash
+case "${1:-}" in
+  display-message) echo bash ;;
 esac
 exit 0
 SH
@@ -1330,6 +1350,47 @@ test_reused_slot_leased_to_other_task_refuses() {
   pass "teardown refuses when the recorded slot was re-leased to a different task"
 }
 
+# The recorded worktree lives at a path containing whitespace. The status parser
+# must treat the whole span between the state field and any trailing holder
+# marker as the path, so the row still matches and the foreign lease is refused.
+test_reused_slot_leased_spaced_path_refuses() {
+  local case_dir rc wt_spaced
+  case_dir=$(make_case reused-slot-spaced)
+  wt_spaced="$case_dir/wt with space"
+  git -C "$case_dir/project" worktree add -q -b fm/task-spaced "$wt_spaced" main
+  fm_write_meta "$case_dir/state/task-x1.meta" \
+    "window=fm-task-x1" \
+    "worktree=$wt_spaced" \
+    "project=$case_dir/project" \
+    "kind=ship" \
+    "mode=no-mistakes"
+  git -C "$wt_spaced" -c user.email=t@t -c user.name=t commit -q --allow-empty -m work
+  cat > "$case_dir/fakebin/treehouse" <<SH
+#!/usr/bin/env bash
+if [ "\${1:-}" = status ]; then
+  printf '%s\n' "1     leased       $wt_spaced  (held by task-other)"
+  exit 0
+fi
+if [ "\${1:-}" = return ]; then
+  : > "$case_dir/return-attempted"
+  exit 0
+fi
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/treehouse"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "reused-slot-spaced: a whitespace path must still match and refuse"
+  assert_grep "REFUSED" "$case_dir/stderr" "reused-slot-spaced: expected a REFUSED line"
+  assert_grep "task-other" "$case_dir/stderr" "reused-slot-spaced: refusal should name the lease holder"
+  assert_absent "$case_dir/return-attempted" "reused-slot-spaced: teardown must NOT return the spaced-path slot"
+  pass "teardown matches a treehouse slot whose path contains whitespace"
+}
+
 test_reused_slot_in_use_with_dead_endpoint_refuses() {
   local case_dir rc
   case_dir=$(make_case reused-slot-inuse)
@@ -1348,6 +1409,29 @@ test_reused_slot_in_use_with_dead_endpoint_refuses() {
   assert_grep "another process" "$case_dir/stderr" "reused-slot-inuse: refusal should cite the live foreign owner"
   assert_absent "$case_dir/return-attempted" "reused-slot-inuse: teardown must NOT kill the live owner"
   pass "teardown refuses when the recorded slot is live-owned by another task and this task's session is gone"
+}
+
+# A live-owned re-handed slot whose pane LINGERS as a bare shell after this
+# task's agent exited. Pane presence alone would falsely license the return; the
+# confident agent-liveness probe reads the bare shell as dead and refuses.
+test_reused_slot_in_use_bare_shell_refuses() {
+  local case_dir rc
+  case_dir=$(make_case reused-slot-bareshell)
+  write_meta "$case_dir" no-mistakes ship
+  wt_commit "$case_dir" "work"
+  add_slot_status_treehouse "$case_dir" in-use ""
+  add_tmux_bare_shell_pane "$case_dir"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "reused-slot-bareshell: a lingering bare shell must not license teardown"
+  assert_grep "REFUSED" "$case_dir/stderr" "reused-slot-bareshell: expected a REFUSED line"
+  assert_grep "another process" "$case_dir/stderr" "reused-slot-bareshell: refusal should cite the foreign owner"
+  assert_absent "$case_dir/return-attempted" "reused-slot-bareshell: teardown must NOT return the live owner's worktree"
+  pass "teardown refuses a re-handed slot when this task's pane is only a lingering bare shell"
 }
 
 # An UNRECOGNIZED non-free state word (neither lease, available, nor self) with
@@ -1412,6 +1496,27 @@ test_force_does_not_bypass_reused_slot_guard() {
   pass "--force does not bypass the re-handed-slot guard"
 }
 
+# A state word that merely CONTAINS "lease" as a substring (e.g. "released") is
+# NOT a lease. It must fall through to the possibly-owned branch rather than
+# being misclassified and refused with a misleading "leased to unknown" message.
+# With this task's own agent live, the fall-through proceeds.
+test_released_substring_state_is_not_treated_as_leased() {
+  local case_dir rc
+  case_dir=$(make_case released-not-leased)
+  write_meta "$case_dir" no-mistakes ship
+  # No unpushed work; default tmux mock reports this task's own agent alive.
+  add_slot_status_treehouse "$case_dir" released ""
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 0 "$rc" "released-not-leased: a 'released' state must not be refused as a lease"
+  ! grep -q "leased to" "$case_dir/stderr" || fail "released-not-leased: 'released' was misclassified as a lease"
+  pass "teardown does not treat a 'released' substring state as a lease"
+}
+
 test_owned_slot_teardown_proceeds() {
   local case_dir rc
   case_dir=$(make_case owned-slot)
@@ -1434,7 +1539,10 @@ test_owned_slot_teardown_proceeds() {
 
 test_local_only_fork_remote_allows
 test_reused_slot_leased_to_other_task_refuses
+test_reused_slot_leased_spaced_path_refuses
+test_released_substring_state_is_not_treated_as_leased
 test_reused_slot_in_use_with_dead_endpoint_refuses
+test_reused_slot_in_use_bare_shell_refuses
 test_reused_slot_unknown_state_with_dead_endpoint_refuses
 test_available_slot_with_dead_endpoint_proceeds
 test_force_does_not_bypass_reused_slot_guard

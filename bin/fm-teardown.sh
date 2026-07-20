@@ -508,10 +508,13 @@ canonical_existing_dir() {
 #     marks a slot 'available' when its interactive owner dies, which is exactly
 #     the common post-outage "dead task, slot not reused" recovery case.
 #   - ANY OTHER state (in-use, busy, or any unrecognized/future non-free word) ->
-#     treat as possibly-owned: proceed only if THIS task's own backend endpoint
-#     is still alive (the live owner is us; treehouse never re-hands a live-owned
-#     slot); otherwise REFUSE, since a live/held slot with a dead endpoint of
-#     ours cannot be us.
+#     treat as possibly-owned: proceed only when THIS task's own agent PROCESS is
+#     CONFIDENTLY still alive (fm_backend_agent_alive == alive; the live owner is
+#     us and treehouse never re-hands a live-owned slot); a 'dead' or 'unknown'
+#     reading REFUSES, since a live/held slot without our own confirmed agent
+#     cannot be proven ours. A lingering bare shell (which the weaker
+#     pane-presence probe would accept) is NOT enough - that is exactly the
+#     re-handed-slot hazard this guard exists to catch.
 #
 # Scope: interactive treehouse worktrees only. Orca worktrees (backend=orca) are
 # handled by their own path-match guard. Secondmate homes are leased durably
@@ -542,15 +545,21 @@ assert_treehouse_worktree_owner() {
   # Verified `treehouse status` contract: slot rows are "<slot> <state> <path>
   # [(held by <holder>)]" with columns slot/state/path and states available,
   # leased, and in-use. Extract "<state>\t<path>\t<holder>" rows; version banners
-  # and process lines (whose first field is not a slot number) are skipped.
+  # and process lines (whose first field is not a slot number) are skipped. The
+  # path is everything between the state field and any trailing "(held by ...)"
+  # marker, so a pool path containing whitespace still matches.
   rows=$(printf '%s\n' "$status" | awk '
     $1 ~ /^[0-9]+$/ {
-      state=$2; path=$3; holder="";
-      if (match($0, /\(held by [^)]*\)/)) {
-        h=substr($0, RSTART, RLENGTH);
-        sub(/^\(held by /, "", h); sub(/\)$/, "", h); holder=h;
+      state=$2; holder=""; line=$0;
+      if (match(line, /[[:space:]]*\(held by [^)]*\)[[:space:]]*$/)) {
+        h=substr(line, RSTART, RLENGTH);
+        sub(/^[[:space:]]*\(held by /, "", h); sub(/\)[[:space:]]*$/, "", h);
+        holder=h;
+        line=substr(line, 1, RSTART-1);
       }
-      print state "\t" path "\t" holder;
+      sub(/^[[:space:]]*[0-9]+[[:space:]]+[^[:space:]]+[[:space:]]+/, "", line);
+      sub(/[[:space:]]+$/, "", line);
+      print state "\t" line "\t" holder;
     }')
   [ -n "$rows" ] || return 0
 
@@ -564,7 +573,7 @@ assert_treehouse_worktree_owner() {
     [ "$cand_canon" = "$wt_canon" ] || continue
     sstate_lc=$(printf '%s' "$sstate" | tr '[:upper:]' '[:lower:]')
     case "$sstate_lc" in
-      *lease*)
+      leased)
         echo "REFUSED: teardown of task $ID targets worktree $wt, but treehouse now reports that pool slot leased to '${sholder:-unknown}', not this task." >&2
         echo "The recorded worktree pointer is stale - its slot was re-handed after an outage. Returning it would destroy another task's work. Preserving task state." >&2
         return 1
@@ -573,10 +582,10 @@ assert_treehouse_worktree_owner() {
         return 0
         ;;
       *)
-        if fm_backend_target_exists "$BACKEND" "$T" "fm-$ID"; then
+        if [ "$(fm_backend_agent_alive "$BACKEND" "$T")" = alive ]; then
           return 0
         fi
-        echo "REFUSED: teardown of task $ID targets worktree $wt, but treehouse reports that pool slot held by another process (state '$sstate') while this task's own session is gone." >&2
+        echo "REFUSED: teardown of task $ID targets worktree $wt, but treehouse reports that pool slot held by another process (state '$sstate') while this task's own agent is gone." >&2
         echo "The recorded worktree pointer is stale - its slot was re-handed after an outage. Returning it would kill the live owner. Preserving task state." >&2
         return 1
         ;;
