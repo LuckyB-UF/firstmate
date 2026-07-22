@@ -321,6 +321,36 @@ test_scout_and_secondmate_load_decision_hold_policy() {
   pass "fm-brief.sh: investigation and visual-review completions load the shared decision policy"
 }
 
+# The tdd seam-discipline folds into every ship brief (all three delivery
+# modes) and stays out of scout and secondmate briefs, which do not implement.
+test_ship_briefs_carry_test_discipline() {
+  local home id brief
+  home="$TMP_ROOT/test-discipline-home"
+  write_registry "$home"
+  for id_proj in "brief-tdd-nm:no-registry-proj" "brief-tdd-dpr:direct-proj" "brief-tdd-lo:local-proj"; do
+    id=${id_proj%%:*}
+    proj=${id_proj##*:}
+    FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" "$proj" >/dev/null 2>&1
+    brief="$home/data/$id/brief.md"
+    assert_grep "# Test discipline" "$brief" "$id: ship brief missing the test-discipline section"
+    assert_grep "Agree the test seam before you implement" "$brief" \
+      "$id: ship brief missing the seam-agreement instruction"
+    assert_grep "the reproduction is the regression test" "$brief" \
+      "$id: ship brief missing the regression-test rule"
+    assert_grep "Testing internals instead of observable behavior" "$brief" \
+      "$id: ship brief missing the named test anti-patterns"
+  done
+  # Scout and secondmate briefs do not implement, so they carry no test discipline.
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" brief-tdd-scout alpha --scout >/dev/null 2>&1
+  assert_no_grep "# Test discipline" "$home/data/brief-tdd-scout/brief.md" \
+    "scout brief must not carry the ship test-discipline section"
+  FM_HOME="$home" FM_SECONDMATE_CHARTER='x' \
+    "$ROOT/bin/fm-brief.sh" brief-tdd-mate --secondmate --no-projects >/dev/null 2>&1
+  assert_no_grep "# Test discipline" "$home/data/brief-tdd-mate/brief.md" \
+    "secondmate charter must not carry the ship test-discipline section"
+  pass "fm-brief.sh: ship briefs carry test discipline, scout and secondmate briefs do not"
+}
+
 # Scout and secondmate paths still scaffold well-formed briefs.
 test_scout_and_secondmate_scaffold() {
   local brief
@@ -354,4 +384,5 @@ test_herdr_lab_contract_applies_to_scouts_but_not_secondmates
 test_secondmate_no_projects_charter
 test_pause_verb_override_renders_all_brief_scaffolds
 test_scout_and_secondmate_load_decision_hold_policy
+test_ship_briefs_carry_test_discipline
 test_scout_and_secondmate_scaffold

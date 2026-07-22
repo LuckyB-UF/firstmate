@@ -86,7 +86,7 @@ state/               volatile runtime signals; gitignored
   <id>.status        appended by crewmates: "<state>: <note>" wake-event lines, not current-state truth
   <id>.turn-ended    touched by turn-end hooks
   <id>.grok-turnend-token   firstmate-owned grok hook registry token for the task; removed by teardown
-  <id>.meta          written by fm-spawn: window=, worktree=, project=, harness=, model=, effort=, kind=, mode=, yolo=, tasktmp=; kind=secondmate also records home= and projects=; a non-default runtime backend records further backend-specific fields (docs/configuration.md "Runtime backend"; bin/fm-backend.sh, section 8); fm-pr-check, including through fm-pr-merge, records one canonical pr= and the forge's pr_head= when available (GitHub pull requests and GitLab merge requests; docs/gitlab-merge-watch.md); fm-x-link appends x_request=, x_request_ts=, x_followups=, and optional x_platform=/x_reply_max_chars= for an X-mode-originated task (section 14)
+  <id>.meta          task metadata written by fm-spawn and appended by fm-pr-check (canonical pr=/pr_head=) and fm-x-link (X-mode fields); see bin/fm-spawn.sh --help and docs/configuration.md "Runtime backend" for the exact field set (section 8, section 14)
   <id>.herdr-presentation  quarantinable attempt journal for Herdr's optional visual projection; never task or endpoint authority; see docs/herdr-backend.md "Optional disposable single-task presentation spaces"
   <id>.check.sh      authenticated slow poll; the watcher dispatches validated PR data and the byte-identified X shim through trusted repository scripts, runs registered custom checks from hash-validated private snapshots, and rejects every other state check without execution
   <id>.check-trust   private content binding created by fm-check-register.sh for an intentional custom check
@@ -132,8 +132,8 @@ A lock-refused session must not spawn, steer, merge, drain the wake queue, repai
 1. **Lock** - acquires the per-home session lock first, before anything mutates shared state.
 2. **Bootstrap** - detect-only checks (tool/version problems, GitHub auth, the worktree-tangle check, harness override, dispatch-profile validation, backlog-backend status) always run, but routine confirmations stay silent by default.
    When the lock could not be acquired, the worktree-tangle check uses read-only advisory wording without a checkout repair command.
-   The five MUTATING sweeps - non-executing legacy PR-check migration, fleet sync, the local secondmate fast-forward sweep, the secondmate liveness sweep, and X-mode artifact writes - run only when this session actually holds the lock from step 1.
-   The secondmate liveness sweep deterministically guarantees every registered secondmate is actually running: it probes each live secondmate's endpoint for a real agent process (not just pane presence), respawns only on a confident dead reading, and reports only skipped or failed guarantees as `SECONDMATE_LIVENESS:` lines (`bin/fm-bootstrap.sh`; `bin/fm-backend.sh`'s `fm_backend_agent_alive`).
+   The mutating sweeps - see `bin/fm-session-start.sh` for the roster - run only when this session actually holds the lock from step 1.
+   The secondmate liveness sweep guarantees every registered secondmate is actually running and surfaces only failed or skipped guarantees as an actionable `SECONDMATE_LIVENESS:` line; `secondmate-provisioning` owns it.
 3. **Wake queue** - when locked, drains the durable wake queue and prints the raw records prominently as this turn's first work queue; a bounded, clearly labeled historical status-event annotation may follow a valid `signal` record but never replaces it or current-state reconciliation, and a lapsed watcher chain still surfaces here via the same guard alarm.
    When the lock could not be acquired, the queue is left untouched because another session owns it, and the guard's tangle/watcher-liveness alarms still print in read-only advisory mode without drain, supervision repair, or checkout repair commands.
 4. **Context digest** - the full contents of `data/projects.md`, `data/secondmates.md`, `data/captain.md`, `data/captain-shared.md`, and `data/learnings.md`, each clearly delimited.
@@ -240,6 +240,11 @@ Write the task-specific brief under section 11 before spawning.
 
 ### Dispatch and supervision handoff
 
+For a non-trivial feature whose shape is still fuzzy, an optional sharpening path runs before dispatch: load the `grill` skill when the captain invokes `/grill`, or offer it when a request is too vague to write acceptance criteria against.
+It interviews the captain into a short spec at `data/spec-<project>-<slug>.md`, which then feeds the ordinary brief below.
+When a sharpened spec is too large to brief as one crewmate task, load the `decompose` skill (captain-invoked as `/decompose`, or run it yourself here) to break the spec into dependency-ordered vertical-slice backlog items with `blocked-by` edges before dispatch.
+Skip both for a sharp request, a bug, or a scout question; dispatching directly stays the default.
+
 Spawn only through `bin/fm-spawn.sh` after the profile and backend checks in section 4.
 The spawn must resolve a genuine isolated task worktree distinct from the primary checkout; a failed isolation assertion stops the task.
 After spawning, confirm the worker is processing the brief, handle any trust dialog through `harness-adapters`, and record ship or scout work as under way.
@@ -292,12 +297,12 @@ For PR-based ship tasks, the ready signal depends on mode: `no-mistakes` reports
 Run `bin/fm-pr-check.sh <id> <PR url>` - it records `pr=` and the forge's `pr_head=` when available in the task's meta and arms the watcher's merge poll.
 Tell the captain the PR's full URL, always the complete `https://...` link rather than a bare `#number`, a concise outcome summary, and the no-mistakes risk level when applicable.
 A captain instruction to merge is explicit authority; `yolo` is the only standing routine authority.
-For any custom `state/<id>.check.sh` you write yourself, keep it an ordinary single-link mode-`0700` file, print one line only when firstmate should wake, print nothing otherwise, finish before `FM_CHECK_TIMEOUT`, then bind its current bytes with `bin/fm-check-register.sh <id>` before the watcher may execute it.
+For any custom `state/<id>.check.sh` you write yourself, see `bin/fm-check-register.sh --help` for the authoring contract; a custom check runs only after `fm-check-register.sh <id>` binds its bytes.
 
 Tear down a ship task only after landing is confirmed.
 A teardown refusal for uncommitted or unlanded work is a stop-and-investigate result, never an obstacle to bypass.
 Never force teardown without explicit discard authority.
-After successful teardown, record completion, retain only the configured recent Done history, and re-evaluate queued work whose blockers and time gates have cleared.
+After successful teardown, record completion, retain only the configured recent Done history, and re-evaluate queued work that is not held and whose blockers and time gates have cleared.
 
 A secondmate is persistent and an empty queue is healthy.
 Retire one only on an explicit captain or main-firstmate decision, after loading `secondmate-provisioning`; its home must contain no work under way, and forced discard still requires explicit captain authority.
@@ -407,6 +412,7 @@ Batch non-urgent updates into the next natural reply.
 Use plain chat for a yes-or-no decision and `lavish-axi` only when several options or a structured report benefit from a visual surface.
 Whenever a PR is mentioned, include its full `https://...` URL before any shorthand reference.
 Mention cost as a courtesy when unusually much work is running, but never block on it.
+When the captain asks for a bearings report, morning brief, status catch-up, or where they left off - or invokes `/bearings` - load the `bearings` skill.
 
 ## 10. Backlog contract
 
@@ -416,7 +422,8 @@ Work routed to a secondmate is recorded in that secondmate home's own backlog, n
 When a main-side thread such as a pending captain decision or relay reminder is worth durable tracking, file it as its own work item; use `tasks-axi hold <id> --reason "<reason>" --kind captain` for a captain-gated thread.
 Unresolved decisions discovered by investigations or visual reviews follow `decision-hold-lifecycle`, which owns their mandatory backlog lifecycle.
 Update the backlog on every dispatch, completion, and decision for a work item.
-Re-evaluate queued work after every teardown and heartbeat, dispatching items only when dependencies and time gates have cleared.
+Re-evaluate queued work after every teardown and heartbeat, dispatching items only when they are not held and dependencies and time gates have cleared.
+A held item is never dispatchable until its hold is cleared, whoever set it and for whatever reason.
 
 `.tasks.toml`, `docs/configuration.md`, and current `tasks-axi --help` own the backlog schema, compatibility, retention, and routine command syntax.
 Use compatible `tasks-axi` when the configured backend selects it and the documented manual path otherwise; keep only the configured recent Done entries.
@@ -444,10 +451,12 @@ The scaffold is a safety contract, not a suggestion.
 
 ## 12. Self-update
 
-Firstmate's shared instruction surface reaches running homes only after it lands on the default branch and those homes fast-forward.
-Only `AGENTS.md`, `bin/`, and `.agents/skills/` are loaded by a running firstmate; public `skills/` is an installer-facing surface.
+This fleet runs a fork: `origin` is the shared upstream, and `fork/main` carries upstream plus this fleet's private adaptations.
+Every home runs `fork/main`, so an improvement reaches a running home only after it is on `fork/main` and that home fast-forwards to it; upstream enters only by being merged into `fork/main`.
+Never advance a home from origin, which would strip the fleet's adaptations.
+Only `AGENTS.md`, `bin/`, and `.agents/skills/` are a running firstmate instruction surface; public `skills/` is tracked for installers and is not loaded by firstmate.
 When the captain invokes `/updatefirstmate` or asks to update firstmate, load the `/updatefirstmate` skill.
-It performs guarded fast-forward updates of firstmate and registered secondmate homes, refreshes instructions, and never touches anything under `projects/`.
+It merges upstream into `fork/main`, performs only fast-forward self-updates of firstmate and registered secondmate homes from `fork/main`, re-reads `AGENTS.md` when needed, nudges updated live secondmates, and never touches anything under `projects/`.
 
 ## 13. Agent-only reference skills
 

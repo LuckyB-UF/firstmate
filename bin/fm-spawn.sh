@@ -23,7 +23,8 @@
 #   auto-detected tmux stays silent; zellij and orca are never auto-detected.
 #   codex-app is not a known backend yet; docs/codex-app-backend.md owns that
 #   blocked backend contract. Default tmux spawns do not write backend= to meta;
-#   absent backend= means tmux. cmux does not support --secondmate spawns yet.
+#   absent backend= means tmux. orca, cmux, and zellij do not support
+#   --secondmate spawns yet.
 #   A backend spawn refusal (missing dependency, version gate, unauthenticated
 #   socket, or unsupported secondmate mode) is terminal for that selected backend;
 #   callers must surface it instead of silently retrying another backend.
@@ -81,6 +82,13 @@
 #   default-branch commit when safe; skipped syncs warn and launch unchanged.
 #   Ship/scout spawns refuse to launch unless the resolved task path is a real
 #   git worktree root distinct from the primary project checkout.
+#   Task metadata written to state/<id>.meta: window=, worktree=, project=,
+#   harness=, model=, effort=, kind=, mode=, yolo=, tasktmp=. A kind=secondmate
+#   spawn also records home= and projects=; a non-default runtime backend records
+#   further backend-specific fields (docs/configuration.md "Runtime backend";
+#   bin/fm-backend.sh). fm-pr-check later appends canonical pr=/pr_head=, and
+#   fm-x-link appends the X-mode fields for an X-mode-originated task (AGENTS.md
+#   section 14).
 # Batch dispatch: pass one or more `id=repo` pairs instead of a single <id> <project>, e.g.
 #     fm-spawn.sh fix-a-k3=projects/foo add-b-q7=projects/bar [--scout]
 #   Each pair re-execs this script in single-task mode, so the single path stays the only
@@ -108,7 +116,7 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
-  sed -n '2,78p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,85p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 case "${1:-}" in
@@ -204,13 +212,13 @@ else
 fi
 fm_backend_validate_spawn "$BACKEND" || exit 1
 fm_backend_source "$BACKEND" || exit 1
-if [ "$BACKEND" = orca ] && [ "$KIND" = secondmate ]; then
-  echo "error: backend=orca does not support --secondmate spawns yet" >&2
-  exit 1
-fi
-if [ "$BACKEND" = cmux ] && [ "$KIND" = secondmate ]; then
-  echo "error: backend=cmux does not support --secondmate spawns yet" >&2
-  exit 1
+if [ "$KIND" = secondmate ]; then
+  case "$BACKEND" in
+    orca | cmux | zellij)
+      echo "error: backend=$BACKEND does not support --secondmate spawns yet" >&2
+      exit 1
+      ;;
+  esac
 fi
 if [ "$BACKEND" = orca ]; then
   fm_backend_orca_runtime_check || exit 1
@@ -411,15 +419,33 @@ launch_template() {
   # shellcheck disable=SC2016  # single quotes are deliberate: $(cat ...) expands in the crewmate pane, not here
   case "$harness" in
     # CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false disables claude's interactive
-    # predicted-next-prompt ghost text, which renders as dim/faint text inside an
-    # otherwise-empty composer and would otherwise read like real typed input when
-    # firstmate captures the pane (see the harness-adapters skill). It is a per-launch env
-    # prefix scoped to this firstmate-launched agent; it never touches the captain's
-    # global config. The CLI's --prompt-suggestions flag is print/SDK-mode only and
-    # does NOT suppress the interactive ghost text (verified empirically), so the env
-    # var is the correct control. The dim-aware composer reader in fm-tmux-lib.sh is
-    # the defense-in-depth backstop for any pane this flag cannot reach.
-    claude) printf '%s' 'CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions __MODELFLAG____EFFORTFLAG__"$(cat __BRIEF__)"' ;;
+    # predicted-next-prompt ghost text, which renders as dim/faint (SGR 2) text inside
+    # an otherwise-empty composer. It is a per-launch env prefix scoped to this
+    # firstmate-launched agent; it never touches the captain's global config. The CLI's
+    # --prompt-suggestions flag is print/SDK-mode only and does NOT suppress the
+    # interactive ghost text (verified empirically), so the env var is the correct control.
+    #
+    # The prefix is applied per KIND, because the suggestion's value and its cost differ:
+    #   ship/scout - DISABLED. An autonomous crewmate is a worker the captain never
+    #     drives from its own composer, so the suggestion has no reader to help and is
+    #     pure classifier risk.
+    #   secondmate - ENABLED (no prefix). A secondmate is a captain-facing agent the
+    #     captain does read and drive, so it shows the native suggestion exactly as the
+    #     captain's own session does. Safety rests on the shared fm_composer_strip_ghost
+    #     (bin/fm-composer-lib.sh), the one fleet-wide ANSI-aware extractor of real typed
+    #     content, which every secondmate-reachable composer read routes through - the
+    #     same backstop that already covers the captain's own firstmate pane, which this
+    #     flag never reached either. The plain-screen readers that cannot strip ghost
+    #     styling - orca, cmux, and zellij - all refuse --secondmate spawns above, so no
+    #     secondmate can land on a reader without fm_composer_strip_ghost. See the
+    #     harness-adapters skill for the contract that rule satisfies.
+    claude)
+      if [ "$kind" = secondmate ]; then
+        printf '%s' 'claude --dangerously-skip-permissions __MODELFLAG____EFFORTFLAG__"$(cat __BRIEF__)"'
+      else
+        printf '%s' 'CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions __MODELFLAG____EFFORTFLAG__"$(cat __BRIEF__)"'
+      fi
+      ;;
     codex)
       if [ "$kind" = secondmate ]; then
         printf '%s' 'codex __MODELFLAG____EFFORTFLAG__--dangerously-bypass-approvals-and-sandbox "$(cat __BRIEF__)"'
@@ -772,6 +798,20 @@ real_path_or_raw() {  # <path>
   fi
 }
 
+# spawn_worktree_ok: true when <path> is itself the top of a git worktree
+# distinct from PROJ_ABS_REAL. The one place that decides "is this an isolated
+# worktree", shared by the poll below (probing non-fatally while waiting for
+# the backend to actually move the pane there) and validate_spawn_worktree
+# (the fatal final check) - see that function for why a naive "differs from
+# PROJ_ABS_REAL" comparison alone is not sufficient.
+spawn_worktree_ok() {  # <path>
+  local p=$1 p_real top top_real
+  p_real=$(cd "$p" 2>/dev/null && pwd -P) || return 1
+  top=$(git -C "$p" rev-parse --show-toplevel 2>/dev/null) || return 1
+  top_real=$(cd "$top" 2>/dev/null && pwd -P) || return 1
+  [ "$p_real" = "$top_real" ] && [ "$p_real" != "$PROJ_ABS_REAL" ]
+}
+
 # Session-provider container-ensure + task creation. tmux stays exactly as P1
 # left it (same session-name / new-window sequence, see bin/backends/tmux.sh);
 # a herdr spawn goes through the version-gated, workspace-per-HOME,
@@ -781,18 +821,9 @@ real_path_or_raw() {  # <path>
 # that every downstream operation (send/capture/kill) already treats as opaque
 # per-backend routing (fm_backend_resolve_selector).
 validate_spawn_worktree() {  # <source> <inspect-target>
-  local source=$1 inspect_target=$2 wt_real proj_real wt_top wt_top_real
-  wt_real=
-  if ! wt_real=$(cd "$WT" 2>/dev/null && pwd -P); then
-    wt_real=
-  fi
-  proj_real=$PROJ_ABS_REAL
-  wt_top=$(git -C "$WT" rev-parse --show-toplevel 2>/dev/null || true)
-  wt_top_real=
-  if ! wt_top_real=$(cd "$wt_top" 2>/dev/null && pwd -P); then
-    wt_top_real=
-  fi
-  if [ -z "$wt_real" ] || [ -z "$wt_top_real" ] || [ "$wt_real" != "$wt_top_real" ] || [ "$wt_real" = "$proj_real" ]; then
+  local source=$1 inspect_target=$2 wt_top
+  if ! spawn_worktree_ok "$WT"; then
+    wt_top=$(git -C "$WT" rev-parse --show-toplevel 2>/dev/null || true)
     echo "error: $source did not yield an isolated worktree (resolved '$WT'; worktree root '${wt_top:-none}'; primary '$PROJ_ABS'); refusing to launch to avoid tangling the primary checkout. Inspect target $inspect_target" >&2
     exit 1
   fi
@@ -1047,10 +1078,12 @@ if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   # A single read that already differs from PROJ_ABS_REAL is not proof the pane
   # settled there: on some tmux/WSL setups a brand-new window's pane_current_path
   # transiently reports an unrelated stale path (seen live as another real git
-  # checkout entirely) before the shell catches up with treehouse get's cd. That
-  # stale path still passes the PROJ_ABS_REAL comparison and validate_spawn_worktree
-  # below (it resolves to a real, distinct worktree top-level too), so accepting it
-  # on one read alone silently records the wrong worktree= in state/<id>.meta. Require
+  # checkout entirely, or a pre-shell-init transient such as the terminal
+  # multiplexer's own default directory) before the shell catches up with
+  # treehouse get's cd. That stale path can still pass the PROJ_ABS_REAL
+  # comparison and validate_spawn_worktree below (it may resolve to a real,
+  # distinct worktree top-level too), so accepting it on one read alone silently
+  # records the wrong worktree= in state/<id>.meta. Require
   # two consecutive reads to agree on the same non-project path before accepting it;
   # a mismatch just becomes the new candidate rather than resetting the wait, so a
   # pane that is already settled by the first real read only costs the one existing

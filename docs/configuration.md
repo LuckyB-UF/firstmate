@@ -32,7 +32,9 @@ It moves in-scope `## Queued` items only and refuses `## In flight` and historic
 Handoff item bodies must use at least two leading spaces, and the helper refuses a selected item with a single-space or tab-indented continuation rather than risk orphaning it.
 Because bootstrap requires `tasks-axi` on `PATH` on every profile, that delegation works fleet-wide, and the `config/backlog-backend=manual` knob governs firstmate's own hand-editing of its backlog, not this validated helper.
 Compatible means the shared bootstrap probe accepts `tasks-axi --version` as 0.1.1 or newer, `tasks-axi update --help` exposes `--archive-body`, and `tasks-axi mv --help` exposes `[<id>...]` for the atomic multi-ID move introduced in 0.2.2 and required by handoff delegation.
-That sentence is the single owner of the tasks-axi compatibility definition; every other document points here instead of restating the version gates.
+An unparseable or older version reports incompatible before either feature probe runs.
+That multi-ID probe is mandatory, so the effective version floor is 0.2.2 or newer even though the probe gates on the features rather than on the version number.
+That definition is the single owner of the tasks-axi compatibility contract; every other document points here instead of restating the version gates.
 Bootstrap requires compatible `tasks-axi` on every profile; see "Toolchain" below for missing-tool reporting and silent default-backend behavior.
 Set the local, gitignored `config/backlog-backend` file to `manual` to force manual backlog editing and suppress the verbose `BOOTSTRAP_INFO: tasks-axi available` fact, not missing-tool reporting.
 Absent or `tasks-axi` selects the default tasks-axi backend.
@@ -49,7 +51,9 @@ See [`docs/cmux-backend.md`](cmux-backend.md#runtime-auto-detection) for why cmu
 Auto-detected herdr or cmux prints a stderr notice naming `config/backend` and `--backend tmux` as opt-outs; auto-detected tmux stays silent to preserve existing default behavior.
 Zellij and Orca are never auto-detected; select them by putting the name in a local `config/backend` file, by exporting `FM_BACKEND=<name>`, or by telling the first mate in chat.
 Any value other than `tmux`, `herdr`, `zellij`, `orca`, or `cmux` is rejected until another adapter is implemented and verified.
-`fm-spawn.sh` accepts `tmux`, `herdr`, `zellij`, `orca`, and `cmux` for ship and scout tasks; `backend=orca` and `backend=cmux` both still refuse `--secondmate` until secondmate launch semantics are designed for each.
+`fm-spawn.sh` accepts `tmux`, `herdr`, `zellij`, `orca`, and `cmux` for ship and scout tasks; `backend=orca`, `backend=cmux`, and `backend=zellij` all still refuse `--secondmate`, for two distinct reasons.
+`backend=orca` and `backend=cmux` refuse until secondmate launch semantics are designed for each.
+`backend=zellij` refuses because it is a plain-screen reader with no ANSI channel, so it cannot strip claude's native prompt-suggestion ghost text through the shared `fm_composer_strip_ghost`.
 `codex-app` is not an accepted runtime backend yet; [`docs/codex-app-backend.md`](codex-app-backend.md) owns the Codex App boundary.
 The session-start secondmate liveness sweep uses a deeper `fm_backend_agent_alive` probe where verified.
 Today that probe can classify tmux and herdr secondmate endpoints as `alive`, `dead`, or `unknown`; zellij, Orca, and cmux report `unknown` until their own agent-process classifiers are verified.
@@ -77,6 +81,8 @@ For normal herdr operations, `HERDR_SESSION` selects the named session, but dest
 Use the explicit guarded cleanup path described in [`docs/herdr-backend.md`](herdr-backend.md) instead of `herdr server stop`.
 For normal zellij operations, `FM_ZELLIJ_SESSION` selects the named session and defaults to `firstmate`.
 Zellij has no per-home workspace split: primary and secondmate tasks share that one session, and visible tab titles are scoped by the active `FM_HOME` readable label plus a short hash of the resolved `FM_ROOT` path as `fm-<home-label>-<id>`.
+That sharing stays live for secondmate homes because `config/backend` is not inherited, so a secondmate home can select zellij itself and spawn its own ship and scout tabs into the same session.
+Only a secondmate agent endpoint is legacy here, since `fm-spawn.sh` refuses a `--secondmate` launch on this backend.
 Use the guarded cleanup path described in [`docs/zellij-backend.md`](zellij-backend.md) instead of `kill-all-sessions` or `delete-all-sessions`.
 cmux has no session layer at all - one workspace per task, in whatever cmux window is open - and its socket password (when configured) is read from local, gitignored `config/cmux-socket-password` under the effective config directory, never committed.
 The caller-facing label remains `fm-<id>`, but the actual cmux workspace title is scoped by the active `FM_HOME` readable label plus a short hash of the resolved `FM_ROOT` path as `fm-<home-label>-<id>`.

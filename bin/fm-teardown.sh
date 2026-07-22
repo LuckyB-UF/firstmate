@@ -34,6 +34,15 @@
 # device. It refuses and preserves task state when that proof fails; otherwise
 # it removes the task's check, trust record, PR sidecar, publication record, and
 # quarantine entries with the rest of the volatile state.
+# Before acting on the recorded worktree= at all, teardown verifies (via
+# treehouse's own `status`) that the recorded interactive treehouse slot has not
+# been re-handed to a DIFFERENT task after an outage. Recognition is anchored on
+# treehouse's known-free states, so only 'available' and the self "you're here"
+# slot pass; a slot now leased to any holder is refused outright, and a slot in
+# use by, or in any unrecognized non-free state while this task's own session is
+# gone, is likewise refused loudly rather than killed. This guard is layered
+# before the destructive actions and is not bypassed by --force; see
+# assert_treehouse_worktree_owner for the full contract.
 # Orca tasks use the same safety checks, then close the recorded terminal and
 # remove the recorded worktree through `orca worktree rm`; teardown never guesses
 # an Orca target from ambient CLI state.
@@ -424,7 +433,7 @@ backlog_refresh_reminder() {
     esac
     printf '%s\n' "Backlog: $ID just finished. Run $done_cmd, then run tasks-axi ready for dependency-cleared candidates, check date gates, and dispatch only work whose blockers are gone and date is due."
   else
-    printf '%s\n' "Backlog: $ID just finished. Update data/backlog.md - move $ID to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work whose blockers are gone and date is due."
+    printf '%s\n' "Backlog: $ID just finished. Update data/backlog.md - move $ID to Done, keep Done to the 10 most recent, then re-scan Queued and dispatch only work that is not held and whose blockers are gone and date is due."
   fi
 }
 
@@ -487,6 +496,146 @@ canonical_existing_dir() {
   [ -n "$target" ] || return 1
   [ -d "$target" ] || return 1
   ( cd "$target" && pwd -P )
+}
+
+# Reboot-hazard guard (fm-worktree-meta-stale-release): a task's recorded
+# worktree= pointer goes stale after an outage. Treehouse frees a pool slot when
+# its interactive owner process dies, then re-hands that same slot to a NEW task
+# via a later `treehouse get`. The dead task's meta still records the old slot
+# path, so tearing the DEAD task down would kill the process and return the
+# worktree that now belongs to a LIVE, unrelated task.
+#
+# Before any destructive action, confirm treehouse still considers the recorded
+# worktree owned by THIS task (or unowned), using treehouse's own `status`.
+# Recognition is anchored on the KNOWN-FREE states, so an unknown/future non-free
+# word fails CLOSED rather than proceeding. For the matched slot row:
+#   - LEASED to any holder -> REFUSE. A crewmate/scout worktree is acquired
+#     interactively and is never leased, so a lease on its recorded path proves a
+#     different, durable owner took the slot.
+#   - 'available' -> proceed. Treehouse marks a slot 'available' when its
+#     interactive owner dies, which is exactly the common post-outage "dead task,
+#     slot not reused" recovery case.
+#   - A KNOWN-occupied state (in-use or a busy variant) -> treat as possibly
+#     re-handed and decide by THIS task's own agent liveness. Where
+#     fm_backend_agent_alive is authoritative (tmux/herdr) proceed only on a
+#     confident 'alive' and REFUSE on 'dead' - a live/held slot without our own
+#     confirmed agent is the re-handed-slot hazard, and a lingering bare shell
+#     (which the weaker pane-presence probe would accept) is NOT enough. Where
+#     that probe cannot classify the backend and returns 'unknown' (zellij, cmux,
+#     others), fall back to pane PRESENCE via fm_backend_target_exists so a
+#     legitimate teardown on those backends is not blocked by the probe gap:
+#     proceed when the recorded endpoint still exists, refuse when it is gone.
+#   - ANY OTHER (unrecognized/future non-free) state -> REFUSE. An unknown STATE
+#     cannot be proven still ours, so it fails CLOSED; this is distinct from an
+#     unknown AGENT-liveness on a known-occupied slot, which falls back rather
+#     than blocking.
+#
+# Scope: interactive treehouse worktrees only. Orca worktrees (backend=orca) are
+# handled by their own path-match guard. Secondmate homes are leased durably
+# (treehouse never re-hands a leased slot), so they are immune to this hazard and
+# pass through their existing guards. A recorded path treehouse does not list
+# (no treehouse slot, or an environment without treehouse) also passes through
+# unchanged: the guard refuses only on POSITIVE foreign-owner evidence, never on
+# absence of information, so it cannot break legitimate teardowns.
+#
+# This guard is intentionally NOT bypassed by --force. --force authorizes
+# discarding THIS task's OWN unlanded work; it is never a license to destroy a
+# DIFFERENT task's live worktree, so a re-handed slot is refused even under
+# --force. Reclaiming a slot from a stranger is a treehouse-level operation, not
+# a task teardown.
+assert_treehouse_worktree_owner() {
+  local wt=$1 wt_canon status rows sstate sstate_lc spath sholder cand_canon tilde='~'
+  [ "$BACKEND" = orca ] && return 0
+  [ "$KIND" = secondmate ] && return 0
+  [ -n "$wt" ] && [ -d "$wt" ] || return 0
+  command -v treehouse >/dev/null 2>&1 || return 0
+  [ -n "$PROJ" ] && [ -d "$PROJ" ] || return 0
+
+  wt_canon=$(canonical_existing_dir "$wt") || return 0
+
+  # `treehouse status` resolves the pool from the working directory; the task
+  # worktree came from the project's pool, so query it from the project.
+  status=$( cd "$PROJ" 2>/dev/null && treehouse status 2>/dev/null ) || return 0
+  # Verified `treehouse status` contract: slot rows are "<slot> <state> <path>
+  # [(held by <holder>)]" with columns slot/state/path and states available,
+  # leased, and in-use. Extract "<state>\t<path>\t<holder>" rows; version banners
+  # and process lines (whose first field is not a slot number) are skipped. The
+  # path is everything between the state field and any trailing "(held by ...)"
+  # marker, so a pool path containing whitespace still matches.
+  rows=$(printf '%s\n' "$status" | awk '
+    $1 ~ /^[0-9]+$/ {
+      state=$2; holder=""; line=$0;
+      if (match(line, /[[:space:]]*\(held by [^)]*\)[[:space:]]*$/)) {
+        h=substr(line, RSTART, RLENGTH);
+        sub(/^[[:space:]]*\(held by /, "", h); sub(/\)[[:space:]]*$/, "", h);
+        holder=h;
+        line=substr(line, 1, RSTART-1);
+      }
+      sub(/^[[:space:]]*[0-9]+[[:space:]]+[^[:space:]]+[[:space:]]+/, "", line);
+      sub(/[[:space:]]+$/, "", line);
+      print state "\t" line "\t" holder;
+    }')
+  [ -n "$rows" ] || return 0
+
+  while IFS=$'\t' read -r sstate spath sholder; do
+    [ -n "$spath" ] || continue
+    # treehouse status abbreviates $HOME to a leading '~'; expand it (via a
+    # variable so the literal tilde is never in a would-be-expanded position)
+    # before canonicalizing, or the row will not match an absolute worktree path.
+    case "$spath" in "$tilde"|"$tilde"/*) spath="$HOME${spath#"$tilde"}" ;; esac
+    cand_canon=$(canonical_existing_dir "$spath" 2>/dev/null || printf '%s' "$spath")
+    [ "$cand_canon" = "$wt_canon" ] || continue
+    sstate_lc=$(printf '%s' "$sstate" | tr '[:upper:]' '[:lower:]')
+    case "$sstate_lc" in
+      leased)
+        echo "REFUSED: teardown of task $ID targets worktree $wt, but treehouse now reports that pool slot leased to '${sholder:-unknown}', not this task." >&2
+        echo "The recorded worktree pointer is stale - its slot was re-handed after an outage. Returning it would destroy another task's work. Preserving task state." >&2
+        return 1
+        ;;
+      available)
+        return 0
+        ;;
+      in-use|in_use|inuse|*busy*)
+        # A matched KNOWN-occupied slot (in-use or a busy variant). Decide by
+        # THIS task's own agent liveness on two INDEPENDENT axes. Where
+        # fm_backend_agent_alive is authoritative (tmux/herdr) proceed only on a
+        # confident 'alive' and refuse on 'dead' - a live/held slot without our
+        # own confirmed agent is exactly the re-handed-slot hazard. Where it
+        # returns 'unknown' (zellij/cmux/other, which it cannot probe) fall back
+        # to pane PRESENCE via fm_backend_target_exists: proceed when the
+        # recorded endpoint still exists, refuse when it is gone, so a legitimate
+        # teardown on those backends is never blocked by the probe gap. Unknown
+        # AGENT-liveness therefore falls back, never blocks; only an unrecognized
+        # STATE (below) refuses outright.
+        case "$(fm_backend_agent_alive "$BACKEND" "$T")" in
+          alive)
+            return 0
+            ;;
+          dead)
+            echo "REFUSED: teardown of task $ID targets worktree $wt, but treehouse reports that pool slot held by another process (state '$sstate') while this task's own agent is gone." >&2
+            echo "The recorded worktree pointer is stale - its slot was re-handed after an outage. Returning it would kill the live owner. Preserving task state." >&2
+            return 1
+            ;;
+          *)
+            if fm_backend_target_exists "$BACKEND" "$T"; then
+              return 0
+            fi
+            echo "REFUSED: teardown of task $ID targets worktree $wt, but treehouse reports that pool slot held by another process (state '$sstate') while this task's own agent is gone." >&2
+            echo "The recorded worktree pointer is stale - its slot was re-handed after an outage. Returning it would kill the live owner. Preserving task state." >&2
+            return 1
+            ;;
+        esac
+        ;;
+      *)
+        echo "REFUSED: teardown of task $ID targets worktree $wt, but treehouse reports that pool slot in an unrecognized state '$sstate', which cannot be proven to still belong to this task." >&2
+        echo "Refusing rather than risk returning a slot that was re-handed after an outage and destroying another task's work. Preserving task state." >&2
+        return 1
+        ;;
+    esac
+  done <<EOF
+$rows
+EOF
+  return 0
 }
 
 retry_wait_secs_is_valid() {
@@ -1075,6 +1224,12 @@ if [ "$BACKEND" = orca ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ] &&
   require_orca_worktree_path_match "$ORCA_WORKTREE_ID" "$WT" || exit 1
   ORCA_PATH_MATCH_VERIFIED=1
 fi
+
+# Reboot-hazard guard: refuse before any destructive action if the recorded
+# worktree slot was re-handed to a different task after an outage. Runs for both
+# normal and --force teardowns (see assert_treehouse_worktree_owner); a no-op for
+# Orca, secondmate, and non-treehouse worktrees.
+assert_treehouse_worktree_owner "$WT" || exit 1
 
 if [ -d "$WT" ] && [ "$FORCE" != "--force" ]; then
   if validate_worktree_teardown_safety; then
