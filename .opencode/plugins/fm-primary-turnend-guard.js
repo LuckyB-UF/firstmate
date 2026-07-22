@@ -21,6 +21,10 @@ function runProcess(command, args, input = "") {
     });
     child.on("error", () => resolve({ code: 0, stdout: "", stderr: "" }));
     child.on("close", (code) => resolve({ code: code ?? 0, stdout, stderr }));
+    // A child that exits before consuming stdin (fast git/guard exits) makes
+    // this write raise EPIPE as a stream 'error' event; without a listener,
+    // Node treats it as unhandled and kills the whole plugin host process.
+    child.stdin.on("error", () => {});
     child.stdin.end(input);
   });
 }
