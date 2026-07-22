@@ -195,22 +195,33 @@ test_spawn_isolation_abort() {
   git -C "$proj" worktree add -q --detach "$TMP_ROOT/spawn-wt" >/dev/null 2>&1
   mkdir -p "$TMP_ROOT/spawn-notgit" "$proj/sub"
 
+  # Since the WSL spawn-worktree race fix (c61a5ac), the detection loop polls
+  # until the pane path passes spawn_worktree_ok rather than aborting on the
+  # first non-worktree read, so a pane that never reaches a genuine isolated
+  # worktree is refused via the loop's timeout ("did not enter a worktree
+  # within 60s") instead of validate_spawn_worktree's immediate "did not yield
+  # an isolated worktree". The isolation SAFETY property is unchanged and is
+  # what these two abort cases verify: the spawn still refuses (exit 1) and
+  # still records no meta; only the refusal message and timing moved. Each
+  # abort case therefore takes the full ~60s poll window to conclude.
   # Abort: the pane resolves to a plain non-git directory (not a worktree at all).
   out=$(run_spawn "$home" abort-notgit-dd4 "$proj" "$TMP_ROOT/spawn-notgit" "$fakebin"); status=$?
   expect_code 1 "$status" "spawn into a non-worktree dir should abort"
-  assert_contains "$out" "did not yield an isolated worktree" "non-worktree spawn lacked the isolation error"
+  assert_contains "$out" "did not enter a worktree within 60s" "non-worktree spawn lacked the timeout refusal"
   assert_absent "$home/state/abort-notgit-dd4.meta" "aborted spawn must not record meta"
 
   # Abort: the pane resolves INTO the primary checkout (a subdir of PROJ_ABS).
   out=$(run_spawn "$home" abort-primary-ee5 "$proj" "$proj/sub" "$fakebin"); status=$?
   expect_code 1 "$status" "spawn landing inside the primary checkout should abort"
-  assert_contains "$out" "did not yield an isolated worktree" "primary-checkout spawn lacked the isolation error"
+  assert_contains "$out" "did not enter a worktree within 60s" "primary-checkout spawn lacked the timeout refusal"
+  assert_absent "$home/state/abort-primary-ee5.meta" "aborted spawn must not record meta"
 
   # Proceed: the pane resolves to a genuine, isolated worktree.
   out=$(run_spawn "$home" ok-isolated-ff6 "$proj" "$TMP_ROOT/spawn-wt" "$fakebin"); status=$?
   expect_code 0 "$status" "spawn into a genuine isolated worktree should succeed"
   assert_contains "$out" "spawned ok-isolated-ff6" "isolated spawn did not report success"
   assert_not_contains "$out" "did not yield an isolated worktree" "isolated spawn wrongly tripped the guard"
+  assert_not_contains "$out" "did not enter a worktree within 60s" "isolated spawn wrongly hit the timeout refusal"
   pass "fm-spawn: aborts unless the resolved worktree is a genuine, isolated worktree"
 }
 
