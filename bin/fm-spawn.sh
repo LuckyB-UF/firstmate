@@ -95,7 +95,8 @@
 #   git worktree root distinct from the primary project checkout.
 #   Task metadata written to state/<id>.meta: window=, worktree=, project=,
 #   harness=, model=, effort=, kind=, mode=, yolo=, tasktmp=. A kind=secondmate
-#   spawn also records home= and projects=; a non-default runtime backend records
+#   spawn also records home=, projects=, and label= (session display name); a
+#   non-default runtime backend records
 #   further backend-specific fields (docs/configuration.md "Runtime backend";
 #   bin/fm-backend.sh). fm-pr-check later appends canonical pr=/pr_head=, and
 #   fm-x-link appends the X-mode fields for an X-mode-originated task (AGENTS.md
