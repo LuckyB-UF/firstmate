@@ -103,6 +103,7 @@ pi
 
 For Grok, `--trust` is needed once per clone so project hooks and the turn-end guard load; `/hooks-trust` inside Grok works too.
 For Pi, approve the project trust prompt once per clone on first launch so the tracked `.pi/extensions/*.ts` files auto-load.
+For Claude Code, launching through `bin/fm-main.sh` (or an alias to it) instead of bare `claude` also names the session `FM Main` so remote-control apps can tell it apart; that script's header owns the mechanics.
 Every Pi session starts with calm mode off; `/calm` is a session-local conversation-focused transcript toggle.
 While active, it uses Pi's supported presentation APIs to hide the live working row, collapsed thinking labels, all seven built-in tool shells, the Firstmate watcher tool shell, and known Firstmate-injected inputs.
 Every injected input remains in model context and session storage.
