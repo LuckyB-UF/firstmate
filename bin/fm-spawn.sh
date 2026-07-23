@@ -1091,7 +1091,19 @@ if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   # becomes the new candidate rather than resetting the wait, so a pane that
   # is already settled by the first real read only costs the one existing
   # inter-poll sleep as confirmation, not a whole extra cycle on top.
+  # Fast-refusal early abort (the follow-up filed with the WSL race fix), in
+  # its provably-safe subset: a pane whose reported path is NONEXISTENT on two
+  # consecutive identical reads can never become an isolated worktree, so
+  # refuse it in ~2s instead of burning the full 60s window. This matters
+  # under the herdr presentation-order lock, whose bounded (5s) contention
+  # window sits around this poll: a slow abort forces a concurrent sibling
+  # into its flat fallback. The WSL transient this loop defends against (a
+  # pre-shell-init cwd such as the multiplexer's default directory) is always
+  # an EXISTING directory, so it can never match this fast path; existing
+  # non-worktree paths still wait the full 60s.
   candidate=""
+  missing_path=""
+  missing_reads=0
   for _ in $(seq 1 60); do
     p=$(spawn_current_path "$WT_TARGET" || true)
     if [ -n "$p" ] && spawn_worktree_ok "$p"; then
@@ -1101,8 +1113,25 @@ if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
         break
       fi
       candidate="$p_real"
+      missing_path=""
+      missing_reads=0
     else
       candidate=""
+      if [ -n "$p" ] && [ ! -e "$p" ]; then
+        if [ "$p" = "$missing_path" ]; then
+          missing_reads=$((missing_reads + 1))
+          if [ "$missing_reads" -ge 2 ]; then
+            echo "error: treehouse get did not yield an isolated worktree: window $T is parked on nonexistent path '$p'" >&2
+            exit 1
+          fi
+        else
+          missing_path="$p"
+          missing_reads=1
+        fi
+      else
+        missing_path=""
+        missing_reads=0
+      fi
     fi
     sleep 1
   done

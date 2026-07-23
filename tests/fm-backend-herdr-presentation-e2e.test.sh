@@ -746,9 +746,18 @@ spawn_task abort-b "$HOME_DIR" "$PROJECT_DIR" > "$TMP_ROOT/abort-b.out" 2> "$TMP
 ABORT_B_PID=$!
 if wait "$ABORT_A_PID"; then fail "post-create abort fixture A unexpectedly succeeded"; fi
 if wait "$ABORT_B_PID"; then fail "post-create abort fixture B unexpectedly succeeded"; fi
-grep -F "did not yield an isolated worktree" "$TMP_ROOT/abort-a.err" >/dev/null 2>&1 \
+# Since the WSL spawn-worktree race fix (c61a5ac; see tests/fm-tangle-guard.test.sh),
+# the detection loop itself refuses a pane that never reaches a genuine
+# isolated worktree: the armed nonexistent path here trips its fast-refusal
+# early abort ("did not yield an isolated worktree: ... nonexistent path"),
+# while an existing non-worktree path would trip its poll timeout ("did not
+# enter a worktree within 60s"). The isolation SAFETY property is identical
+# across all shapes: the spawn exits 1, publishes no metadata, and runs the
+# same post-create cleanup; accept every refusal shape so the fixture asserts
+# the abort, not one message lineage.
+grep -E "did not yield an isolated worktree|did not enter a worktree within 60s" "$TMP_ROOT/abort-a.err" >/dev/null 2>&1 \
   || fail "post-create abort fixture A did not reach the armed validation failure"
-grep -F "did not yield an isolated worktree" "$TMP_ROOT/abort-b.err" >/dev/null 2>&1 \
+grep -E "did not yield an isolated worktree|did not enter a worktree within 60s" "$TMP_ROOT/abort-b.err" >/dev/null 2>&1 \
   || fail "post-create abort fixture B did not reach the armed validation failure"
 ABORT_A_PANE=$(cat "$POST_CREATE_ABORT_CONTROL/abort-a/task-pane")
 ABORT_B_PANE=$(cat "$POST_CREATE_ABORT_CONTROL/abort-b/task-pane")
