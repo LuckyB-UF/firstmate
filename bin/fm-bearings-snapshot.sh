@@ -19,8 +19,9 @@
 # explicitly (the prs: line and the omitted[] surfaces) what was not requested, so an
 # absence is never ambiguous.
 #
-# This wrapper consumes canonical status decisions plus structured captain-held
-# backlog items. It never infers decisions from report or visual-review prose.
+# This wrapper consumes canonical status decisions plus canonically normalized
+# backlog roles, unresolved blockers, and captain actionability. It never infers
+# decisions from report or visual-review prose or reimplements snapshot semantics.
 #
 # Main-home inventory validity comes from the canonical snapshot's main_inventory
 # object (orphan structured in-flight without meta, unstructured current rows).
@@ -105,18 +106,21 @@ Default fields: schema, home, generated, prs, in_flight{id,kind,state,doing},
   secondmates{id,state,doing,provenance,freshness,age_seconds,contradiction,reason},
   decisions_open{id,key,verb,summary,owner}, landed{id,what,artifact,owner},
   gates{id,title,blocked_by,reason,owner}, reports{id,path}, recorded_prs{id,url},
-  where a gate's blocked_by names any reason the item is not dispatchable, not
-  only a blocker id: a hold renders as "hold (<kind>)", and an item both held and
-  blocked renders both, separated by "; ",
+  where a gate's blocked_by names why the item is not dispatchable: unresolved
+  blocker ids joined by "," when any remain, else a hold renders as
+  "hold (<kind>)"; a held item's hold_reason still leads its reason field, and
+  a captain hold with no unresolved blockers is captain-actionable and surfaces
+  in Captain's Call instead of gates,
   unhealthy_endpoints{...} (only when non-empty), omitted{surface,reveal}.
 landed merges this home's Done with registered secondmate homes' Done, bounded by
   a per-home cap (FM_BEARINGS_LANDED_PER_HOME) and an overall cap (FM_BEARINGS_LANDED),
   with omitted[] disclosure. Default selection is balanced across deterministic home
   order while preserving each home's internal newest-first order; sparse homes do
   not waste capacity. --all-landed reveals the full global newest-first set.
-For every registered secondmate, validated structured state from its own home is
-  authoritative. Parent events and bounded terminal reads are labeled fallback or
-  contradiction evidence and never become current work.
+For every registered secondmate, readable structured facts from its own home are
+  authoritative, including independently trustworthy surfaces from a partial summary.
+  Parent events and bounded terminal reads are labeled fallback or contradiction
+  evidence and never become current work.
 Opt-in surfaces: --fields bodies|paths|actions|endpoints, --all-in-flight,
   --all-decisions, --all-secondmates, --all-landed, --all-reports, --all-queued, --all-recorded-prs,
   --all-unhealthy, --all-pr-repos, --include-prs (adds candidate_prs).
@@ -306,16 +310,18 @@ MODEL=$(printf '%s' "$SNAP" | jq \
   def trunc($n): if . == null then null else
     (tostring | gsub("\\s+"; " ") | if (length > $n) then (.[:$n] + "…") else . end) end;
   def gate_by:
-    (if (.held // false) then
-       ("hold" + (if ((.hold_kind // "") == "") then "" else " (" + .hold_kind + ")" end))
-     else null end) as $hold
-    | [ $hold, (.blocked_by // null) ] | map(select(. != null))
-    | if length == 0 then "-" else join("; ") end;
+    ((.unresolved_blocker_ids // []) | if length > 0 then join(",") else null end) as $blockers
+    | (if (.held // false) then
+         ("hold" + (if ((.hold_kind // "") == "") then "" else " (" + .hold_kind + ")" end))
+       else null end) as $hold
+    | if $blockers != null then ($blockers | trunc(120))
+      elif $hold != null then $hold
+      else "-" end;
   def gate_reason:
     (if (.held // false) then
        (if ((.hold_reason // "") == "") then "no reason recorded" else .hold_reason end)
      else null end) as $hold
-    | [ $hold, (if (.blocked_by // null) == null then null else (.blocked_reason // null) end) ]
+    | [ $hold, (if ((.unresolved_blocker_ids // []) | length) > 0 then (.blocked_reason // null) else null end) ]
     | map(select(. != null))
     | if length == 0 then "-" else (join("; ") | trunc(40)) end;
   def round_robin_landed($n):
@@ -342,6 +348,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
   | (if $all_landed == 1 then $landed_sorted else ($per_home_groups | round_robin_landed($landed_n)) end) as $done
   | ($done | map(.id)) as $done_ids
   | ([.tasks[] | select(.kind != "secondmate") | .id]) as $live_ids
+  | ([.tasks[] | select(.kind != "secondmate" and .current_state.state == "working") | .id]) as $working_ids
   | ($live_ids + $done_ids) as $rel_ids
   | ([ .tasks[]
        | select(.endpoint.exists == false or .endpoint.agent_alive == "dead")
@@ -382,8 +389,11 @@ MODEL=$(printf '%s' "$SNAP" | jq \
           provenance:.provenance.selected,freshness:.freshness.status,
           age_seconds:.freshness.age_seconds,contradiction:(.contradiction // false),
           reason:(.current.reason // "-")} ]) as $secondmates_all
-  | ([ .tasks[] | select(.kind != "secondmate") | {
-        id, kind,
+  | ([ .tasks[]
+       | select(.kind != "secondmate")
+       | select(.backlog.current_role != "program")
+       | select(.backlog.current_role != "held" or .current_state.state == "working")
+       | {id, kind,
         state: .current_state.state,
         doing: ((.current_state.detail // "") as $d
                 | (if $d != "" then $d else (.hints.last_event_text // "") end) | trunc(90))
@@ -393,8 +403,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
          | {id,kind:"secondmate",state:.bearings_state,
             doing:([.active_children[] | .id + ": " + (.doing // .state)] | join("; ") | trunc(90))} ]) as $in_flight_all
   | ([ .backlog.records[]
-         | select(.state == "queued" and .structured and .kind == "captain"
-                  and .hold_kind == "captain" and .hold_reason != null)
+         | select(.structured and .captain_actionable == true)
          | {id,key:.id,verb:"captain-hold",
             summary:((.title + ": " + .hold_reason) | trunc(90)),owner:"(main)"} ]
      + [ (.secondmate_current.records // [])[] as $m | $m.decisions_open[]?
@@ -409,8 +418,11 @@ MODEL=$(printf '%s' "$SNAP" | jq \
           owner:"(main)"}]
       else [] end)
      + [ .backlog.records[]
-         | select(.state == "queued" and .structured)
-         | select((.kind == "captain" and .hold_kind == "captain" and .hold_reason != null) | not)
+         | . as $record
+         | select(.structured and
+             (.state == "queued" or
+              (.state == "in_flight" and .current_role == "held" and ($working_ids | index($record.id) | not))))
+         | select(.captain_actionable != true)
          | select(($all_queued == 1)
                   or (((.body_excerpt // "") | test("SUPERSEDED|NOT REQUIRED|NOT-REQUIRED|DEFERRED"; "i")) | not))
          | {id, title:(.title | trunc(60)), blocked_by:(gate_by), reason:(gate_reason),
@@ -418,7 +430,7 @@ MODEL=$(printf '%s' "$SNAP" | jq \
      + [ (.secondmate_current.records // [])[] as $m
          | select($m.provenance.selected == "structured-home")
          | $m.queued[]?
-         | select((.kind == "captain" and .hold_kind == "captain" and .hold_reason != null) | not)
+         | select(.captain_actionable != true)
          | {id,title:(.title | trunc(60)),blocked_by:(gate_by),reason:(gate_reason),
             owner:$m.id} ]) as $gates_all
   | ([ .scout_reports[]
