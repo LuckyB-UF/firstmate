@@ -162,9 +162,10 @@ test_claude_prompt_suggestion_split_by_kind() {
     *CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION*) fail "claude secondmate launch must not disable native prompt suggestions: $launch" ;;
   esac
   # The secondmate launch legitimately carries the home-isolation env prefix
-  # (owned by the FM_HOME propagation tests); pin only that the claude command
-  # itself is intact and unprefixed by the suggestion disable.
-  expected="claude --dangerously-skip-permissions \"\$(cat '$sm/data/charter.md')\""
+  # (owned by the FM_HOME propagation tests) and the derived session display
+  # name (owned by tests/fm-spawn-session-name.test.sh); pin only that the
+  # claude command itself is intact and unprefixed by the suggestion disable.
+  expected="claude --dangerously-skip-permissions --name 'SM Suggestion Secondmate Z18' \"\$(cat '$sm/data/charter.md')\""
   case "$launch" in
     *"$expected") ;;
     *) fail "claude secondmate launch changed"$'\n'"expected suffix: $expected"$'\n'"actual:          $launch" ;;
