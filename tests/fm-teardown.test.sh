@@ -474,6 +474,27 @@ SH
   chmod +x "$case_dir/fakebin/zellij"
 }
 
+# The task's pane still exists but its agent has exited: the pane's foreground
+# command is a plain shell (confidently 'dead' to the agent-liveness probe)
+# while its current path reports the given directory. With cwd = the worktree
+# this is the REAL shape of a healthy finished task under a real treehouse
+# pool: the spawn-time `treehouse get` subshell still sits in the worktree
+# holding the slot after the agent is gone. Args: case_dir cwd
+add_tmux_dead_agent_pane_cwd() {
+  local case_dir=$1 cwd=$2
+  cat > "$case_dir/fakebin/tmux" <<SH
+#!/usr/bin/env bash
+for a in "\$@"; do
+  case "\$a" in
+    '#{pane_current_path}') printf '%s\n' "$cwd"; exit 0 ;;
+    '#{pane_current_command}') echo bash; exit 0 ;;
+  esac
+done
+exit 0
+SH
+  chmod +x "$case_dir/fakebin/tmux"
+}
+
 git_index_lock_path() {
   local dir=$1 lock abs_dir
   lock=$(git -C "$dir" rev-parse --git-path index.lock)
@@ -1620,6 +1641,54 @@ test_zellij_in_use_absent_pane_refuses() {
   pass "teardown of a zellij occupied slot refuses via presence fallback when the endpoint is gone"
 }
 
+# The exact shape CI's real-Herdr E2E lane exposed, replayed on the tmux mock:
+# the task's own slot reads 'in-use' with no holder (the normal look of a plain
+# spawn-time `treehouse get` acquisition under a REAL treehouse), the agent has
+# already exited (foreground is a bare shell, confidently 'dead'), but the pane
+# still sits IN the worktree holding the slot. Occupancy by our own pane is
+# positive ownership: teardown must PROCEED, not refuse.
+test_in_use_own_pane_in_worktree_with_dead_agent_proceeds() {
+  local case_dir rc
+  case_dir=$(make_case inuse-own-pane)
+  write_meta "$case_dir" no-mistakes ship
+  # No unpushed work (HEAD is the origin baseline): the guard verdict decides.
+  add_slot_status_treehouse "$case_dir" in-use ""
+  add_tmux_dead_agent_pane_cwd "$case_dir" "$case_dir/wt"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 0 "$rc" "inuse-own-pane: teardown should proceed when our own pane occupies the slot"
+  ! grep -q REFUSED "$case_dir/stderr" || fail "inuse-own-pane: teardown wrongly refused this task's own occupied slot"
+  assert_present "$case_dir/return-attempted" "inuse-own-pane: teardown should return this task's own slot"
+  pass "teardown proceeds when the in-use slot is occupied by this task's own pane after its agent exited"
+}
+
+# The same dead-agent pane parked OUTSIDE the worktree licenses nothing: with
+# the pane elsewhere, an occupied slot plus a confidently-dead agent is still
+# the re-handed hazard, so the refusal path is unchanged by the ownership axis.
+test_in_use_pane_elsewhere_with_dead_agent_refuses() {
+  local case_dir rc
+  case_dir=$(make_case inuse-pane-elsewhere)
+  write_meta "$case_dir" no-mistakes ship
+  wt_commit "$case_dir" "work"
+  add_slot_status_treehouse "$case_dir" in-use ""
+  add_tmux_dead_agent_pane_cwd "$case_dir" "$case_dir"
+
+  set +e
+  run_teardown "$case_dir" > "$case_dir/stdout" 2> "$case_dir/stderr"
+  rc=$?
+  set -e
+
+  expect_code 1 "$rc" "inuse-pane-elsewhere: an occupied slot with our pane elsewhere must refuse"
+  assert_grep "REFUSED" "$case_dir/stderr" "inuse-pane-elsewhere: expected a REFUSED line"
+  assert_grep "another process" "$case_dir/stderr" "inuse-pane-elsewhere: refusal should cite the foreign owner"
+  assert_absent "$case_dir/return-attempted" "inuse-pane-elsewhere: teardown must NOT return a possibly re-handed slot"
+  pass "teardown still refuses an occupied slot when this task's pane sits outside the worktree"
+}
+
 configure_herdr_projection_teardown_case() {  # <case-dir>
   local case_dir=$1 token=AbCdEfGhIjKlMnOpQrStUv
   sed -i.bak 's/^window=.*/window=fmtest:w1:p2/' "$case_dir/state/task-x1.meta"
@@ -1740,6 +1809,8 @@ test_force_does_not_bypass_reused_slot_guard
 test_owned_slot_teardown_proceeds
 test_zellij_in_use_present_pane_proceeds
 test_zellij_in_use_absent_pane_refuses
+test_in_use_own_pane_in_worktree_with_dead_agent_proceeds
+test_in_use_pane_elsewhere_with_dead_agent_refuses
 test_teardown_prompts_tasks_axi_done_when_compatible
 test_teardown_manual_backend_prompts_hand_edit_even_when_tasks_axi_present
 test_local_only_truly_unpushed_refuses

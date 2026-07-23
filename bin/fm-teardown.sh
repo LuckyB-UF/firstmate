@@ -516,15 +516,27 @@ canonical_existing_dir() {
 #     interactive owner dies, which is exactly the common post-outage "dead task,
 #     slot not reused" recovery case.
 #   - A KNOWN-occupied state (in-use or a busy variant) -> treat as possibly
-#     re-handed and decide by THIS task's own agent liveness. Where
-#     fm_backend_agent_alive is authoritative (tmux/herdr) proceed only on a
-#     confident 'alive' and REFUSE on 'dead' - a live/held slot without our own
+#     re-handed and demand a positive ownership proof, on three axes in order.
+#     FIRST, occupancy by our own pane: `in-use` with no named holder is the
+#     NORMAL state of a slot acquired by this task's own spawn-time `treehouse
+#     get` (real treehouse names holders only for durable leases), so if the
+#     recorded endpoint still exists AND its current path resolves to this very
+#     worktree, the occupant IS this task's own pane - proceed. That is sound
+#     because treehouse's in-use detection is process-cwd based: a slot our
+#     live pane still occupies was never freed, so it cannot have been
+#     re-handed under us. This also keeps a legitimate teardown working when
+#     the agent already exited (its command finished or the harness died) while
+#     the pane's treehouse-get subshell still holds the slot.
+#     SECOND, our own agent liveness. Where fm_backend_agent_alive is
+#     authoritative (tmux/herdr) proceed on a confident 'alive' and REFUSE on
+#     'dead' - a held slot without our own pane in it and without our own
 #     confirmed agent is the re-handed-slot hazard, and a lingering bare shell
-#     (which the weaker pane-presence probe would accept) is NOT enough. Where
-#     that probe cannot classify the backend and returns 'unknown' (zellij, cmux,
-#     others), fall back to pane PRESENCE via fm_backend_target_exists so a
-#     legitimate teardown on those backends is not blocked by the probe gap:
-#     proceed when the recorded endpoint still exists, refuse when it is gone.
+#     parked OUTSIDE the worktree (which the weaker pane-presence probe would
+#     accept) is NOT enough. THIRD, where that probe cannot classify the
+#     backend and returns 'unknown' (zellij, cmux, others), fall back to pane
+#     PRESENCE via fm_backend_target_exists so a legitimate teardown on those
+#     backends is not blocked by the probe gap: proceed when the recorded
+#     endpoint still exists, refuse when it is gone.
 #   - ANY OTHER (unrecognized/future non-free) state -> REFUSE. An unknown STATE
 #     cannot be proven still ours, so it fails CLOSED; this is distinct from an
 #     unknown AGENT-liveness on a known-occupied slot, which falls back rather
@@ -544,7 +556,7 @@ canonical_existing_dir() {
 # --force. Reclaiming a slot from a stranger is a treehouse-level operation, not
 # a task teardown.
 assert_treehouse_worktree_owner() {
-  local wt=$1 wt_canon status rows sstate sstate_lc spath sholder cand_canon tilde='~'
+  local wt=$1 wt_canon status rows sstate sstate_lc spath sholder cand_canon tilde='~' pane_path pane_canon
   [ "$BACKEND" = orca ] && return 0
   [ "$KIND" = secondmate ] && return 0
   [ -n "$wt" ] && [ -d "$wt" ] || return 0
@@ -596,17 +608,29 @@ assert_treehouse_worktree_owner() {
         return 0
         ;;
       in-use|in_use|inuse|*busy*)
-        # A matched KNOWN-occupied slot (in-use or a busy variant). Decide by
-        # THIS task's own agent liveness on two INDEPENDENT axes. Where
-        # fm_backend_agent_alive is authoritative (tmux/herdr) proceed only on a
-        # confident 'alive' and refuse on 'dead' - a live/held slot without our
-        # own confirmed agent is exactly the re-handed-slot hazard. Where it
-        # returns 'unknown' (zellij/cmux/other, which it cannot probe) fall back
-        # to pane PRESENCE via fm_backend_target_exists: proceed when the
-        # recorded endpoint still exists, refuse when it is gone, so a legitimate
-        # teardown on those backends is never blocked by the probe gap. Unknown
-        # AGENT-liveness therefore falls back, never blocks; only an unrecognized
-        # STATE (below) refuses outright.
+        # A matched KNOWN-occupied slot (in-use or a busy variant). Demand a
+        # positive ownership proof on the three axes documented in the header.
+        # Axis 1 - occupancy by our own pane: an unnamed in-use row is the
+        # normal look of this task's OWN treehouse-get acquisition, so when the
+        # recorded endpoint's current path resolves to this very worktree the
+        # occupant is our own pane and the slot cannot have been re-handed.
+        pane_path=$(fm_backend_current_path "$BACKEND" "$T" "fm-$ID")
+        if [ -n "$pane_path" ]; then
+          pane_canon=$(canonical_existing_dir "$pane_path" 2>/dev/null || true)
+          if [ -n "$pane_canon" ] && [ "$pane_canon" = "$wt_canon" ]; then
+            return 0
+          fi
+        fi
+        # Axis 2 - THIS task's own agent liveness. Where fm_backend_agent_alive
+        # is authoritative (tmux/herdr) proceed only on a confident 'alive' and
+        # refuse on 'dead' - a held slot without our own pane in it and without
+        # our own confirmed agent is exactly the re-handed-slot hazard. Axis 3 -
+        # where it returns 'unknown' (zellij/cmux/other, which it cannot probe)
+        # fall back to pane PRESENCE via fm_backend_target_exists: proceed when
+        # the recorded endpoint still exists, refuse when it is gone, so a
+        # legitimate teardown on those backends is never blocked by the probe
+        # gap. Unknown AGENT-liveness therefore falls back, never blocks; only
+        # an unrecognized STATE (below) refuses outright.
         case "$(fm_backend_agent_alive "$BACKEND" "$T")" in
           alive)
             return 0

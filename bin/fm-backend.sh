@@ -728,6 +728,24 @@ fm_backend_agent_alive() {  # <backend> <target>
   esac
 }
 
+# fm_backend_current_path: the current working directory of <target>'s pane as
+# the backend reports it (tmux pane_current_path, herdr foreground_cwd, the
+# zellij/cmux active-pwd probes), or empty when the backend cannot say. The
+# optional <expected-label> is passed through to the backends whose probe wants
+# the window label (zellij, cmux). Best-effort and read-only: callers must
+# treat an empty answer as "unknown", never as evidence of anything.
+fm_backend_current_path() {  # <backend> <target> [expected-label]
+  local backend=$1 target=$2 label=${3:-}
+  fm_backend_source "$backend" || return 0
+  case "$backend" in
+    tmux) fm_backend_tmux_current_path "$target" 2>/dev/null ;;
+    herdr) fm_backend_herdr_current_path "$target" 2>/dev/null ;;
+    zellij) fm_backend_zellij_current_path "$target" "$label" 2>/dev/null ;;
+    cmux) fm_backend_cmux_current_path "$target" "$label" 2>/dev/null ;;
+    *) : ;;
+  esac
+}
+
 # --- native event push (backend-extensible) ---------------------------------
 #
 # The watcher's event-wait splice (bin/fm-watch.sh) is backend-agnostic: it asks
