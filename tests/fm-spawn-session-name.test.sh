@@ -228,7 +228,7 @@ test_ship_spawn_carries_no_label_or_name_flag() {
   assert_no_grep "^label=" "$HOME_DIR/state/$id.meta" "ship meta must not record a label"
   launch=$(cat "$LAUNCH_LOG")
   assert_not_contains "$launch" "--name" "ship launch must not carry a session-name flag"
-  assert_contains "$launch" "claude --dangerously-skip-permissions \"\$(cat " \
+  assert_contains "$launch" "claude --dangerously-skip-permissions \"\$('${ROOT}/bin/fm-operational-input.sh' encode launch-brief < " \
     "ship claude launch changed shape"
   pass "ship spawns stay label-free and keep the launch byte-identical"
 }

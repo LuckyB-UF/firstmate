@@ -437,7 +437,7 @@ test_dispatch_routes_zellij_backend() {
 }
 
 test_dispatch_busy_state_unknown_for_zellij() {
-  # shellcheck source=bin/fm-backend.sh
+  # shellcheck source=/dev/null
   . "$ROOT/bin/fm-backend.sh"
   [ "$(fm_backend_busy_state zellij 'firstmate:5')" = unknown ] \
     || fail "fm_backend_busy_state should report unknown for zellij (no native agent-state primitive; D5: watcher falls back to regex, same as tmux)"
@@ -1037,7 +1037,7 @@ test_spawn_refuses_zellij_secondmate_before_home_mutation() {
   pass "fm-spawn.sh --backend zellij --secondmate: refuses before secondmate-home mutation"
 }
 
-# shellcheck source=bin/fm-backend.sh
+# shellcheck source=/dev/null
 . "$ROOT/bin/fm-backend.sh"
 
 test_version_check_accepts_current_version
