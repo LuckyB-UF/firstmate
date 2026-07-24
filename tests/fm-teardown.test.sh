@@ -158,9 +158,9 @@ SH
 
 # Write a meta file for the task. Args: case_dir mode kind
 write_meta() {
-  local case_dir=$1 mode=$2 kind=$3
+  local case_dir=$1 mode=$2 kind=$3 window=${4:-fm-task-x1}
   fm_write_meta "$case_dir/state/task-x1.meta" \
-    "window=fm-task-x1" \
+    "window=$window" \
     "worktree=$case_dir/wt" \
     "project=$case_dir/project" \
     "kind=$kind" \
@@ -446,7 +446,11 @@ add_tmux_bare_shell_pane() {
   local case_dir=$1
   cat > "$case_dir/fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
+# The window is PRESENT in the session inventory (list-windows lists it) but its
+# foreground command is a plain shell, so the recovery-grade agent-liveness
+# probe reads the pane as 'dead' - the exact bare-shell re-handed-slot hazard.
 case "${1:-}" in
+  list-windows) echo fm-task-x1 ;;
   display-message) echo bash ;;
 esac
 exit 0
@@ -484,6 +488,9 @@ add_tmux_dead_agent_pane_cwd() {
   local case_dir=$1 cwd=$2
   cat > "$case_dir/fakebin/tmux" <<SH
 #!/usr/bin/env bash
+# The window is PRESENT in the session inventory; its foreground command is a
+# plain shell (dead agent) and its cwd is the given path.
+if [ "\${1:-}" = list-windows ]; then echo fm-task-x1; exit 0; fi
 for a in "\$@"; do
   case "\$a" in
     '#{pane_current_path}') printf '%s\n' "$cwd"; exit 0 ;;
@@ -1458,7 +1465,7 @@ test_reused_slot_in_use_with_dead_endpoint_refuses() {
 test_reused_slot_in_use_bare_shell_refuses() {
   local case_dir rc
   case_dir=$(make_case reused-slot-bareshell)
-  write_meta "$case_dir" no-mistakes ship
+  write_meta "$case_dir" no-mistakes ship "fmtest:fm-task-x1"
   wt_commit "$case_dir" "work"
   add_slot_status_treehouse "$case_dir" in-use ""
   add_tmux_bare_shell_pane "$case_dir"
@@ -1672,7 +1679,7 @@ test_in_use_own_pane_in_worktree_with_dead_agent_proceeds() {
 test_in_use_pane_elsewhere_with_dead_agent_refuses() {
   local case_dir rc
   case_dir=$(make_case inuse-pane-elsewhere)
-  write_meta "$case_dir" no-mistakes ship
+  write_meta "$case_dir" no-mistakes ship "fmtest:fm-task-x1"
   wt_commit "$case_dir" "work"
   add_slot_status_treehouse "$case_dir" in-use ""
   add_tmux_dead_agent_pane_cwd "$case_dir" "$case_dir"
